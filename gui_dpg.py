@@ -13,6 +13,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import strings as st
 from modes.emmc.write_files import AREA_NAMES, find_write_files
 from modes.emmc import protocol as P
 
@@ -31,6 +32,23 @@ def _load_version():
 
 APP_VERSION = _load_version()
 APP_TITLE = f"Xgecu Prog v{APP_VERSION}"
+
+
+def _load_lang():
+    cfg = Path(__file__).resolve().parent / ".lang.cfg"
+    try:
+        lang = cfg.read_text(encoding="utf-8").strip().lower()
+        return lang if lang in ("ru", "en") else "en"
+    except OSError:
+        return "en"
+
+
+def _save_lang(lang):
+    cfg = Path(__file__).resolve().parent / ".lang.cfg"
+    try:
+        cfg.write_text(lang + "\n", encoding="utf-8")
+    except OSError:
+        pass
 
 _LOG_VIEW_LINES = 400
 _EXT_FIELD_ORDER = (177, 178, 179, 162, 160)
@@ -376,12 +394,12 @@ class DpgGui:
             self.user_total_sectors = int(user_mb * 1024 * 1024) // P.SECTOR_SIZE
         self.refresh_write_files()
         if dpg.does_item_exist("erase_end") and self.user_total_sectors > 0:
-            if dpg.get_value("erase_target") == "User Area (All)":
+            if self._erase_target_canonical(dpg.get_value("erase_target")) == "USER_ALL":
                 dpg.set_value("erase_end", str(self.user_total_sectors - 1))
         self.table_rows = list(parts)
         self.selected_parts = []
         self._sel_anchor = None
-        dpg.set_value("selected_part_text", "Selected: none")
+        dpg.set_value("selected_part_text", st.S("selected_none"))
         self._rebuild_table()
         self._refresh_write_file_rows()
 
@@ -423,7 +441,7 @@ class DpgGui:
             return
         level = dpg.get_value("combo_log_level")
         query = str(dpg.get_value("input_log_search")).strip().lower()
-        level_map = {"All": None, "INFO": "text", "OK": "ok", "WARN": "warn", "ERROR": "error"}
+        level_map = {st.S("log_level_all"): None, "INFO": "text", "OK": "ok", "WARN": "warn", "ERROR": "error"}
         want = level_map.get(level)
         shown = []
         for text, lvl in self.log_lines:
@@ -437,7 +455,7 @@ class DpgGui:
         for text, lvl in view:
             dpg.add_text(text, color=COL.get(lvl, COL["text"]), parent="log_lines_group",
                          wrap=self._log_wrap_width())
-        dpg.set_value("log_stats_text", "{} lines ({} total)".format(len(shown), len(self.log_lines)))
+        dpg.set_value("log_stats_text", st.S("log_lines_fmt").format(len(shown), len(self.log_lines)))
         self._log_dirty = False
 
     def _log_wrap_width(self):
@@ -461,32 +479,48 @@ class DpgGui:
     # Presets / clock
     # ------------------------------------------------------------------
 
+    _CLOCK_KEYS = ("clock_8", "clock_16", "clock_20", "clock_30", "clock_30_exp")
+
+    def _clock_values(self):
+        values = [st.S(k) for k in self._CLOCK_KEYS[:4]]
+        if self.emmc_preset_display == "THGA":
+            values.append(st.S("clock_30_exp"))
+        return values
+
+    def _preset_values(self):
+        return [st.S("preset_standard"), "THGA", st.S("preset_auto")]
+
+    def _preset_display(self):
+        # canonical display name -> localized combo entry
+        return {st.S("preset_standard"): st.S("preset_standard"),
+                "THGA": "THGA",
+                "Auto": st.S("preset_auto")}[self.emmc_preset_display]
+
     def on_preset_changed(self, sender, value):
-        if value == self.emmc_preset_display:
+        canonical = {st.S("preset_standard"): "standard",
+                     "THGA": "THGA",
+                     st.S("preset_auto"): "Auto"}.get(value)
+        if canonical is None or canonical == self.emmc_preset_display:
             return
-        if value not in _PRESET_DISPLAY_TO_KEY:
-            return
-        protocol_preset = _PRESET_DISPLAY_TO_KEY[value]
+        protocol_preset = _PRESET_DISPLAY_TO_KEY[canonical]
         previous = self.emmc_preset_display
         if previous != "Auto":
             self._preset_clocks[previous] = self.dpg.get_value("combo_clock")
-        self.emmc_preset_display = value
-        clock = self._preset_clocks.get(value, "30 MHz")
-        values = ["8 MHz", "16 MHz", "20 MHz", "30 MHz"]
-        if value == "THGA":
-            values.append("30 MHz (exp.)")
+        self.emmc_preset_display = canonical
+        clock = self._preset_clocks.get(canonical, "30 MHz")
+        values = self._clock_values()
         if clock not in values:
-            clock = "30 MHz"
+            clock = st.S("clock_30")
         P.DEFAULT_PRESET = protocol_preset
-        self.dpg.configure_item("combo_clock", items=values, enabled=(value != "Auto"),
+        self.dpg.configure_item("combo_clock", items=values, enabled=(canonical != "Auto"),
                                 default_value=clock)
         self.on_clock_changed(None, clock, force=True)
-        if previous != value:
-            if value == "Auto":
+        if previous != canonical:
+            if canonical == "Auto":
                 self._append_log_line("[*] Auto: preset and clock are probed before each operation.")
             else:
                 self._append_log_line(
-                    f"[*] eMMC preset: {value}, {clock}. Applies from the next operation.")
+                    f"[*] eMMC preset: {canonical}, {clock}. Applies from the next operation.")
 
     def on_clock_changed(self, sender, value, force=False):
         if self.emmc_preset_display == "Auto":
@@ -497,10 +531,11 @@ class DpgGui:
             return
         if clock_mhz not in P.CLOCK_SELECTORS:
             raise ValueError(f"Unsupported eMMC clock: {clock_mhz} MHz")
-        if "(exp.)" in value and (self.emmc_preset_display != "THGA" or clock_mhz != 30):
+        experimental = "exp" in value or "эксп" in value
+        if experimental and (self.emmc_preset_display != "THGA" or clock_mhz != 30):
             raise ValueError("Experimental 30 MHz is THGA-only")
         P.DEFAULT_CLOCK_MHZ = clock_mhz
-        P.DEFAULT_LEGACY_30 = "(exp.)" in value
+        P.DEFAULT_LEGACY_30 = experimental
         if force:
             self.dpg.set_value("combo_clock", value)
 
@@ -549,7 +584,7 @@ class DpgGui:
     def dump_userdata(self):
         if not self._need_idle():
             return
-        self._file_dialog("Save User Area image", save=True, default_filename="userdata_dump.img",
+        self._file_dialog(st.S("dlg_save_userdata"), save=True, default_filename="userdata_dump.img",
                           extensions=[".img", ".bin", ".raw"],
                           callback=lambda p: self.orchestrator.run_dump_userdata(
                               self.dpg.get_value("chk_voltage"), self.dpg.get_value("combo_bus"),
@@ -558,7 +593,7 @@ class DpgGui:
     def dump_boot(self, name):
         if not self._need_idle():
             return
-        self._file_dialog(f"Save {name}", save=True, default_filename=f"{name}.bin",
+        self._file_dialog(st.S("dlg_save_part").format(name), save=True, default_filename=f"{name}.bin",
                           extensions=[".bin"],
                           callback=lambda p: self.orchestrator.run_dump_boot(
                               self.dpg.get_value("chk_voltage"), self.dpg.get_value("combo_bus"),
@@ -567,7 +602,7 @@ class DpgGui:
     def dump_all(self):
         if not self._need_idle():
             return
-        self._file_dialog("Folder for Boot1.bin, Boot2.bin and userdata.img", directory=True,
+        self._file_dialog(st.S("dlg_dump_folder"), directory=True,
                           callback=self._start_dump_all)
 
     def _start_dump_all(self, folder):
@@ -598,7 +633,7 @@ class DpgGui:
         if len(rows) == 1:
             row = rows[0]
             self._file_dialog(
-                f"Save {row['name']}", save=True,
+                st.S("dlg_save_part").format(row['name']), save=True,
                 default_filename=self._default_dump_name(row['name']),
                 extensions=[".img", ".bin", ".raw"],
                 callback=lambda p: self.orchestrator.run_dump_part(
@@ -608,7 +643,7 @@ class DpgGui:
             return
         # multi-row: pick a folder once, one image per row (auto names)
         self._file_dialog(
-            f"Folder for {len(rows)} partition dumps", directory=True,
+            st.S("dlg_dump_n").format(len(rows)), directory=True,
             callback=lambda folder: self._dump_rows_to_folder(rows, folder))
 
     def _dump_rows_to_folder(self, rows, folder):
@@ -638,7 +673,7 @@ class DpgGui:
             return
         row = rows[0]
         self._file_dialog(
-            f"Image file for {row['name']}",
+            st.S("dlg_image_for").format(row['name']),
             extensions=[".img", ".bin", ".raw"],
             callback=lambda p: self.orchestrator.run_write_part(
                 self.dpg.get_value("chk_voltage"), self.dpg.get_value("combo_bus"),
@@ -714,24 +749,24 @@ class DpgGui:
             if dpg.does_item_exist(tag):
                 dpg.set_value(tag, j in self.selected_parts)
         if not self.selected_parts:
-            dpg.set_value("selected_part_text", "Selected: none")
+            dpg.set_value("selected_part_text", st.S("selected_none"))
         elif len(self.selected_parts) == 1:
             row = self.table_rows[self.selected_parts[0]]
             dpg.set_value("selected_part_text",
-                          f"Selected: {row['name']}  LBA {row['first']}..{row['last']}")
+                          st.S("selected_one").format(row['name'], row['first'], row['last']))
         else:
             rows = [self.table_rows[i] for i in self.selected_parts if i < len(self.table_rows)]
             lba_lo = min(r["first"] for r in rows)
             lba_hi = max(r["last"] for r in rows)
             dpg.set_value("selected_part_text",
-                          f"Selected: {len(rows)} rows  LBA {lba_lo}..{lba_hi}")
+                          st.S("selected_many").format(len(rows), lba_lo, lba_hi))
 
     # ------------------------------------------------------------------
     # Write files
     # ------------------------------------------------------------------
 
     def select_write_folder(self):
-        self._file_dialog("Images folder (boot1/boot2/userdata)", directory=True,
+        self._file_dialog(st.S("dlg_images_folder"), directory=True,
                           callback=self._set_write_folder)
 
     def _set_write_folder(self, folder):
@@ -744,7 +779,7 @@ class DpgGui:
         if self.operation_running or part not in AREA_NAMES:
             return
         self._file_dialog(
-            f"Image for {AREA_NAMES[part]}",
+            st.S("dlg_image_area").format(AREA_NAMES[part]),
             extensions=[".bin", ".img", ".raw"],
             callback=lambda p: self._set_write_file(part, p))
 
@@ -771,7 +806,7 @@ class DpgGui:
         for key, suffix in self._WRITE_ROW_KEYS:
             row = self.write_files[key]
             dpg.set_value(f"txt_write_{suffix}", row["path"])
-            dpg.set_value(f"status_txt_write_{suffix}", _clean_text(row["status"]))
+            dpg.set_value(f"status_txt_write_{suffix}", st.T(_clean_text(row["status"])))
             dpg.configure_item(f"btn_write_{suffix}",
                                enabled=not self.operation_running and row["ready"])
         all_ready = all(self.write_files[a]["ready"] for a in ("BOOT1", "BOOT2", "USER"))
@@ -987,7 +1022,7 @@ class DpgGui:
         if self.operation_running or (compare and not self.extcsd_ready):
             return
         if path is None:
-            self._file_dialog("EXT_CSD file (512 / 544 bytes)", extensions=[".bin"],
+            self._file_dialog(st.S("dlg_extcsd_file"), extensions=[".bin"],
                               callback=lambda p: self.open_extcsd(compare=compare, path=p))
             return
         try:
@@ -1017,7 +1052,7 @@ class DpgGui:
     def save_extcsd(self):
         if self.operation_running or not self.extcsd_ready:
             return
-        self._file_dialog("Save EXT_CSD snapshot", save=True, default_filename="extcsd.bin",
+        self._file_dialog(st.S("dlg_save_extcsd"), save=True, default_filename="extcsd.bin",
                           extensions=[".bin"], callback=self._save_extcsd_to)
 
     def _save_extcsd_to(self, path):
@@ -1107,26 +1142,33 @@ class DpgGui:
     # Erase tab
     # ------------------------------------------------------------------
 
+    _ERASE_CANONICAL = {st.S("area_user_all"): "USER_ALL", "BOOT1": "BOOT1",
+                        "BOOT2": "BOOT2", "Custom LBA": "CUSTOM"}
+
+    def _erase_target_canonical(self, value):
+        return self._ERASE_CANONICAL.get(value, "USER_ALL")
+
     def on_erase_target_changed(self, sender, value):
         dpg = self.dpg
-        if value in ("BOOT1", "BOOT2"):
+        target = self._erase_target_canonical(value)
+        if target in ("BOOT1", "BOOT2"):
             sec_count = (self.boot_size_bytes // P.SECTOR_SIZE) if self.boot_size_bytes > 0 else 8192
             dpg.set_value("erase_start", "0")
             dpg.set_value("erase_end", str(sec_count - 1))
-        elif value == "User Area (All)":
+        elif target == "USER_ALL":
             dpg.set_value("erase_start", "0")
             dpg.set_value("erase_end", str(self.user_total_sectors - 1) if self.user_total_sectors > 0 else "0")
 
     def start_erase(self):
         dpg = self.dpg
-        target = dpg.get_value("erase_target")
+        target = self._erase_target_canonical(dpg.get_value("erase_target"))
         raw_start = str(dpg.get_value("erase_start")).strip()
         raw_end = str(dpg.get_value("erase_end")).strip()
         try:
             start_lba = int(raw_start)
         except ValueError:
             start_lba = 0
-        if "All" in raw_end or "Auto" in raw_end or (raw_end == "0" and target == "User Area (All)"):
+        if target == "USER_ALL" and not raw_end.isdigit():
             end_lba = self.user_total_sectors - 1 if self.user_total_sectors > 0 else 0
         else:
             try:
@@ -1146,11 +1188,11 @@ class DpgGui:
     # ------------------------------------------------------------------
 
     def create_gpt_from_scatter(self):
-        self._file_dialog("MTK scatter file (XML or TXT)", extensions=[".xml", ".txt"],
+        self._file_dialog(st.S("dlg_scatter"), extensions=[".xml", ".txt"],
                           callback=self._scatter_picked)
 
     def _scatter_picked(self, scatter_path):
-        self._file_dialog("Save generated GPT image (LBA 0..33)", save=True,
+        self._file_dialog(st.S("dlg_save_gpt"), save=True,
                           default_filename="gpt.bin", extensions=[".bin"],
                           callback=lambda p: self._scatter_to_gpt(scatter_path, p))
 
@@ -1212,14 +1254,15 @@ class DpgGui:
         def _no():
             dpg.delete_item(tag)
 
-        with dpg.window(modal=True, title="Confirm", tag=tag, width=560, no_resize=True):
+        with dpg.window(modal=True, title=st.S("confirm"), tag=tag, width=560, no_resize=True):
             color = COL["error"] if danger else COL["text"]
             for line in message.splitlines():
-                dpg.add_text(_clean_text(line), color=color)
+                t = dpg.add_text(_clean_text(line), color=color)
+                self._bind_cyr(t)
             dpg.add_spacer(height=8)
             with dpg.group(horizontal=True):
-                dpg.add_button(label="Yes", width=90, callback=_yes)
-                dpg.add_button(label="No", width=90, callback=_no)
+                dpg.add_button(label=st.S("yes"), width=90, callback=_yes)
+                dpg.add_button(label=st.S("no"), width=90, callback=_no)
 
     def _confirm_blocking(self, message):
         # A one-shot synchronous ask over the DPG render loop: needed where
@@ -1236,14 +1279,15 @@ class DpgGui:
         def _no():
             dpg.delete_item(tag)
 
-        with dpg.window(modal=True, title="Confirm EXT_CSD plan", tag=tag, width=560,
+        with dpg.window(modal=True, title=st.S("confirm_plan"), tag=tag, width=560,
                         no_resize=True):
             for line in message.splitlines():
-                dpg.add_text(_clean_text(line), color=COL["error"])
+                t = dpg.add_text(_clean_text(line), color=COL["error"])
+                self._bind_cyr(t)
             dpg.add_spacer(height=8)
             with dpg.group(horizontal=True):
-                dpg.add_button(label="Yes", width=90, callback=_yes)
-                dpg.add_button(label="No", width=90, callback=_no)
+                dpg.add_button(label=st.S("yes"), width=90, callback=_yes)
+                dpg.add_button(label=st.S("no"), width=90, callback=_no)
         while dpg.does_item_exist(tag) and dpg.is_dearpygui_running():
             dpg.render_dearpygui_frame()
         return answer["yes"]
@@ -1311,9 +1355,18 @@ class DpgGui:
     def _header(self, text):
         dpg = self.dpg
         t = dpg.add_text(text, color=COL["accent"])
-        if dpg.does_item_exist("font_header"):
-            dpg.bind_item_font(t, "font_header")
+        font_tag = "font_header_cyr" if st.get_lang() == "ru" else "font_header"
+        if dpg.does_item_exist(font_tag):
+            dpg.bind_item_font(t, font_tag)
         return t
+
+    def _bind_cyr(self, tag, size="chat"):
+        # any widget that can show Cyrillic must use the VCR OSD Mono RUS
+        # font; the default ModeSeven body font is Latin-only
+        dpg = self.dpg
+        font_tag = "font_log" if size == "log" else "font_chat"
+        if dpg.does_item_exist(tag) and dpg.does_item_exist(font_tag):
+            dpg.bind_item_font(tag, font_tag)
 
     def _rebuild_table(self):
         # DPG tables own their columns as children, so clearing rows alone
@@ -1328,10 +1381,10 @@ class DpgGui:
                        context_menu_in_body=False, policy=dpg.mvTable_SizingStretchProp,
                        scrollY=False, delay_search=True):
             dpg.add_table_column(label="#", width_fixed=True)
-            dpg.add_table_column(label="Name")
+            dpg.add_table_column(label=st.S("col_name"))
             dpg.add_table_column(label="FS")
-            dpg.add_table_column(label="LBA range")
-            dpg.add_table_column(label="Size")
+            dpg.add_table_column(label=st.S("col_lba"))
+            dpg.add_table_column(label=st.S("col_size"))
             if not self.table_rows:
                 with dpg.table_row():
                     dpg.add_selectable(label="No partition data - run INIT EMMC first",
@@ -1351,18 +1404,14 @@ class DpgGui:
                                              span_columns=True,
                                              callback=self.on_part_selected, user_data=offset)
                     dpg.bind_item_theme(sel, "part_row_theme")
-                    dpg.add_text(part.get("name", "(unnamed)"))
+                    name_txt = dpg.add_text(part.get("name", "(unnamed)"),
+                                            tag=f"part_name_{offset}")
+                    self._bind_cyr(f"part_name_{offset}")
                     dpg.add_text(part.get("fs", "?"), color=COL["ok"])
                     dpg.add_text(f"{part.get('first', 0)}..{part.get('last', 0)}",
                                  color=COL["lba_blue"])
                     dpg.add_text(size_txt, color=COL["warn"])
             self._apply_row_selection()
-
-        with dpg.theme(tag="part_row_theme"):
-            with dpg.theme_component(dpg.mvSelectable):
-                dpg.add_theme_color(dpg.mvThemeCol_Header, COL["selection_bg"])
-                dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, COL["selection_hover"])
-                dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, COL["selection_active"])
 
     def _build_fonts(self):
         dpg = self.dpg
@@ -1377,6 +1426,10 @@ class DpgGui:
                     dpg.add_font(str(body_font), 16, tag="font_body")
                 if chat_font.is_file():
                     with dpg.font(str(chat_font), 16, tag="font_chat"):
+                        pass
+                    with dpg.font(str(chat_font), 11, tag="font_log"):
+                        pass
+                    with dpg.font(str(chat_font), 22, tag="font_header_cyr"):
                         pass
                 nerd_font = FONTS_DIR / "JetBrainsMonoNerdFont-Regular.ttf"
                 if nerd_font.is_file():
@@ -1415,7 +1468,7 @@ class DpgGui:
     # UI construction
     # ------------------------------------------------------------------
 
-    def build(self):
+    def _build_static(self):
         dpg = self.dpg
         with dpg.texture_registry(show=False):
             logo_path = ASSETS_DIR / "xgecu_prog_cool2.png"
@@ -1428,10 +1481,25 @@ class DpgGui:
                 dpg.add_dynamic_texture(img.size[0], img.size[1],
                                         [b / 255.0 for b in img.tobytes("raw", "RGBA")],
                                         tag="logo_tex")
-
         self._theme()
         self._build_fonts()
 
+        def _set_flag(name, value):
+            def _cb(sender, app_data):
+                setattr(self, name, value)
+            return _cb
+        with dpg.handler_registry():
+            for key in (dpg.mvKey_LShift, dpg.mvKey_RShift):
+                dpg.add_key_down_handler(key, callback=_set_flag("_mod_shift", True))
+                dpg.add_key_release_handler(key, callback=_set_flag("_mod_shift", False))
+            for key in (dpg.mvKey_LControl, dpg.mvKey_RControl):
+                dpg.add_key_down_handler(key, callback=_set_flag("_mod_ctrl", True))
+                dpg.add_key_release_handler(key, callback=_set_flag("_mod_ctrl", False))
+
+    def _build_window(self):
+        dpg = self.dpg
+        # RU interface renders in VCR OSD Mono RUS; ModeSeven is Latin-only
+        dpg.bind_font("font_chat" if st.get_lang() == "ru" else "font_body")
         with dpg.window(tag="main_window", no_title_bar=True, no_move=True,
                         no_scrollbar=True):
             dpg.set_primary_window("main_window", True)
@@ -1443,7 +1511,7 @@ class DpgGui:
                                borders_outerH=False, context_menu_in_body=False,
                                policy=dpg.mvTable_SizingFixedFit):
                     dpg.add_table_column(width_stretch=True, init_width_or_weight=1)
-                    dpg.add_table_column(width_fixed=True, init_width_or_weight=470,
+                    dpg.add_table_column(width_fixed=True, init_width_or_weight=560,
                                          no_resize=True)
                     with dpg.table_row():
                         with dpg.group(horizontal=True):
@@ -1457,28 +1525,32 @@ class DpgGui:
                                 dpg.bind_item_font(title, "font_header")
                         with dpg.group(horizontal=True):
                             dpg.add_spacer(width=-1)
+                            lang_ru = dpg.add_button(label="RU", tag="btn_lang_ru", width=34,
+                                                     callback=lambda s, a: self.set_lang("ru"))
+                            lang_en = dpg.add_button(label="EN", tag="btn_lang_en", width=34,
+                                                     callback=lambda s, a: self.set_lang("en"))
+                            self._refresh_lang_buttons()
+                            dpg.add_spacer(width=12)
                             with dpg.drawlist(width=16, height=16):
                                 dpg.draw_circle(center=(8, 8), radius=5, tag="t48_lamp",
                                                 color=COL["text"] + (255,),
                                                 fill=COL["lamp_error"] + (255,))
                             dpg.add_spacer(width=6)
-                            dpg.add_text("XGecu State:")
+                            dpg.add_text(st.S("state_label"))
                             dpg.add_text("OFFLINE", tag="t48_state_value", color=COL["lamp_error"])
                             dpg.add_spacer(width=10)
-                            dpg.add_text("Firmware:")
+                            dpg.add_text(st.S("firmware_label"))
                             dpg.add_text("-", tag="t48_fw_value", color=COL["idle"])
 
             # mode tabs
             with dpg.child_window(border=False, height=-56, no_scrollbar=True):
                 with dpg.tab_bar(tag="mode_pages", callback=self._on_mode_tab):
-                    with dpg.tab(label="EMMC", tag="tab_emmc"):
+                    with dpg.tab(label=st.S("tab_emmc"), tag="tab_emmc"):
                         self._build_emmc_page()
-                    with dpg.tab(label="NAND [SOON]", tag="tab_nand"):
-                        dpg.add_text("NAND Flash mode is under development", color=COL["idle"])
-                    with dpg.tab(label="SPI [SOON]", tag="tab_spi"):
-                        dpg.add_text("SPI Flash mode is under development", color=COL["idle"])
-                for tab_tag in ("tab_emmc", "tab_nand", "tab_spi"):
-                    pass
+                    with dpg.tab(label=st.S("tab_nand"), tag="tab_nand"):
+                        dpg.add_text(st.S("mode_nand_soon"), color=COL["idle"])
+                    with dpg.tab(label=st.S("tab_spi"), tag="tab_spi"):
+                        dpg.add_text(st.S("mode_spi_soon"), color=COL["idle"])
 
             # bottom bar: state + STOP
             with dpg.child_window(height=50, border=False, no_scrollbar=True):
@@ -1491,20 +1563,16 @@ class DpgGui:
                                               callback=self.stop_operation)
                     self._bind_reset(stop_btn)
                     dpg.add_spacer(width=10)
+        self._rebuild_table()
+        self._refresh_busy_state()
+        self._refresh_write_file_rows()
+        self._refresh_extcsd_rows()
+        self._log_dirty = True
 
-        # global modifier tracking (fallback if is_key_down misses the state)
-        def _set_flag(name, value):
-            def _cb(sender, app_data):
-                setattr(self, name, value)
-            return _cb
-        with dpg.handler_registry():
-            for key in (dpg.mvKey_LShift, dpg.mvKey_RShift):
-                dpg.add_key_down_handler(key, callback=_set_flag("_mod_shift", True))
-                dpg.add_key_release_handler(key, callback=_set_flag("_mod_shift", False))
-            for key in (dpg.mvKey_LControl, dpg.mvKey_RControl):
-                dpg.add_key_down_handler(key, callback=_set_flag("_mod_ctrl", True))
-                dpg.add_key_release_handler(key, callback=_set_flag("_mod_ctrl", False))
-
+    def build(self):
+        self._build_static()
+        self._build_window()
+        dpg = self.dpg
         dpg.create_viewport(title=APP_TITLE, width=1280, height=820, resizable=True)
         icon_path = ASSETS_DIR / "xgecu_prog.ico"
         if icon_path.is_file():
@@ -1516,6 +1584,30 @@ class DpgGui:
         dpg.setup_dearpygui()
         dpg.show_viewport()
         dpg.set_frame_callback(dpg.get_frame_count() + 1, self._first_frame)
+
+    def set_lang(self, lang):
+        if st.get_lang() == lang:
+            return
+        st.set_lang(lang)
+        _save_lang(lang)
+        dpg = self.dpg
+        if dpg.does_item_exist("main_window"):
+            dpg.delete_item("main_window")
+        self._build_window()
+        self._rebuild_table()
+        self._log_dirty = True
+        self._refresh_busy_state()
+        self._refresh_write_file_rows()
+        self._refresh_extcsd_rows()
+
+    def _refresh_lang_buttons(self):
+        dpg = self.dpg
+        active = {"ru": "btn_lang_ru", "en": "btn_lang_en"}[st.get_lang()]
+        other = {"ru": "btn_lang_en", "en": "btn_lang_ru"}[st.get_lang()]
+        if dpg.does_item_exist(active):
+            dpg.bind_item_theme(active, "button_theme_send")
+        if dpg.does_item_exist(other):
+            dpg.bind_item_theme(other, 0)
 
     def _on_mode_tab(self, sender, value):
         mapping = {"tab_emmc": "eMMC", "tab_nand": "NAND", "tab_spi": "SPI"}
@@ -1539,20 +1631,24 @@ class DpgGui:
             with dpg.child_window(height=46, border=False, no_scrollbar=True):
                 with dpg.group(horizontal=True):
                     dpg.add_spacer(width=10)
-                    dpg.add_text("VCCQ 1.8V:")
+                    dpg.add_text(st.S("vccq"))
                     dpg.add_checkbox(tag="chk_voltage", default_value=True)
                     dpg.add_spacer(width=10)
-                    dpg.add_text("Bus:")
+                    dpg.add_text(st.S("bus"))
                     dpg.add_combo(["1-bit", "4-bit"], tag="combo_bus", default_value="4-bit", width=90)
                     dpg.add_spacer(width=10)
-                    dpg.add_text("Clock:")
-                    dpg.add_combo(["8 MHz", "16 MHz", "20 MHz", "30 MHz"], tag="combo_clock",
-                                  default_value="30 MHz", width=130,
+                    dpg.add_text(st.S("clock"))
+                    dpg.add_combo(self._clock_values(), tag="combo_clock",
+                                  default_value=(self._preset_clocks.get(self.emmc_preset_display)
+                                                 if self._preset_clocks.get(self.emmc_preset_display)
+                                                 in self._clock_values() else st.S("clock_30")),
+                                  width=130,
                                   callback=lambda s, a: self.on_clock_changed(s, a))
                     dpg.add_spacer(width=10)
-                    dpg.add_text("Preset:")
-                    dpg.add_combo(["standard", "THGA", "Auto"], tag="combo_preset",
-                                  default_value=self.emmc_preset_display, width=120,
+                    dpg.add_text(st.S("preset"))
+                    dpg.add_combo(self._preset_values(), tag="combo_preset",
+                                  default_value=self._preset_display(),
+                                  width=120,
                                   callback=lambda s, a: self.on_preset_changed(s, a))
                     dpg.add_spacer(width=10)
                     dpg.add_button(label="Scatter -> GPT", tag="btn_scatter_gpt",
@@ -1563,106 +1659,108 @@ class DpgGui:
                 # LEFT: sub-tabs READ / WRITE / ERASE
                 with dpg.child_window(width=-570, border=False):
                     with dpg.tab_bar(tag="emmc_subtabs"):
-                        with dpg.tab(label="READ", tag="sub_read"):
+                        with dpg.tab(label=st.S("sub_read"), tag="sub_read"):
                             with dpg.group(horizontal=True):
                                 dpg.add_checkbox(tag="chk_verify_read", default_value=False)
-                                dpg.add_text("Verify after read")
+                                dpg.add_text(st.S("verify_read"))
                             with dpg.group(horizontal=True):
-                                init_btn = dpg.add_button(label="INIT EMMC", tag="btn_init_emmc",
+                                init_btn = dpg.add_button(label=st.S("btn_init"), tag="btn_init_emmc",
                                                           callback=self.start_analyze, height=30)
                                 self._bind_send(init_btn)
-                                dpg.add_button(label="READ USERDATA", tag="btn_read_userdata",
+                                dpg.add_button(label=st.S("btn_read_userdata"), tag="btn_read_userdata",
                                                callback=self.dump_userdata)
                                 dpg.add_button(label="BOOT1", tag="btn_read_boot1",
                                                callback=lambda: self.dump_boot("BOOT1"))
                                 dpg.add_button(label="BOOT2", tag="btn_read_boot2",
                                                callback=lambda: self.dump_boot("BOOT2"))
-                            dpg.add_button(label="FULL READ (BOOT1 + BOOT2 + USERDATA)",
+                            dpg.add_button(label=st.S("btn_full_read"),
                                            tag="btn_full_read", width=-1, callback=self.dump_all)
                             dpg.add_spacer(height=6)
-                            self._header("PARTITIONS")
+                            self._header(st.S("partitions"))
                             with dpg.child_window(tag="parts_table_body", height=-80, border=True):
                                 pass
-                            dpg.add_text("Selected: none", tag="selected_part_text",
+                            dpg.add_text(st.S("selected_none"), tag="selected_part_text",
                                          color=COL["accent"])
-                            dpg.add_text("Click - select, Ctrl+click - add/remove, "
-                                         "Shift+click - range", color=COL["idle"])
+                            dpg.add_text(st.S("sel_hint"), color=COL["idle"])
                             with dpg.group(horizontal=True):
-                                dpg.add_button(label="DUMP", tag="btn_dump_sel",
+                                dpg.add_button(label=st.S("btn_dump"), tag="btn_dump_sel",
                                                callback=lambda s, a: self.action_read_part())
-                                dpg.add_button(label="WRITE", tag="btn_write_sel",
+                                dpg.add_button(label=st.S("btn_write"), tag="btn_write_sel",
                                                callback=lambda s, a: self.action_write_part())
-                                erase_sel = dpg.add_button(label="ERASE", tag="btn_erase_sel",
+                                erase_sel = dpg.add_button(label=st.S("btn_erase"), tag="btn_erase_sel",
                                                            callback=lambda s, a: self.action_erase_part())
                                 self._bind_reset(erase_sel)
 
-                        with dpg.tab(label="WRITE", tag="sub_write"):
-                            with dpg.group(horizontal=True):
-                                dpg.add_checkbox(tag="chk_verify_write", default_value=True)
-                                dpg.add_text("Verify after write")
-                            with dpg.group(horizontal=True):
-                                dpg.add_checkbox(tag="chk_erase_before_write", default_value=True)
-                                dpg.add_text("Erase before write (whole selected area)")
-                            dpg.add_spacer(height=6)
-                            dpg.add_text("IMAGES FOLDER", color=COL["accent"])
-                            with dpg.group(horizontal=True):
-                                dpg.add_input_text(tag="txt_write_folder", default_value="",
-                                                   hint="No folder selected", width=-130,
-                                                   readonly=True)
-                                dpg.add_button(label="Browse...", tag="btn_select_write_folder",
-                                               width=110, callback=lambda s, a: self.select_write_folder())
-                            with dpg.group(horizontal=True):
-                                dpg.add_button(label="Refresh files", tag="btn_refresh_files",
-                                               callback=lambda s, a: self.refresh_write_files())
-                                init_btn2 = dpg.add_button(label="INIT EMMC",
-                                                           callback=lambda s, a: self.start_analyze())
-                                self._bind_send(init_btn2)
-                            dpg.add_button(
-                                label="WRITE CHIP (BOOT1 + BOOT2 + USERDATA + selected EXT_CSD)",
-                                tag="btn_write_all", width=-1,
-                                callback=lambda s, a: self.start_write_all(), enabled=False)
-                            dpg.add_text("Smaller image = warning, larger = error. "
-                                         "Userdata covers the whole User Area.",
-                                         color=COL["idle"], wrap=480)
-                            dpg.add_spacer(height=6)
-                            for key, title, tag in (
-                                    ("BOOT1", "BOOT1", "boot1"),
-                                    ("BOOT2", "BOOT2", "boot2"),
-                                    ("USER", "Userdata", "userdata"),
-                                    ("EXTCSD", "EXT_CSD (512 / 544 bytes)", "extcsd")):
+                        with dpg.tab(label=st.S("sub_write"), tag="sub_write"):
+                            with dpg.child_window(height=-1, border=False):
                                 with dpg.group(horizontal=True):
-                                    dpg.add_text(title)
-                                    dpg.add_spacer(width=70)
-                                    dpg.add_input_text(tag=f"txt_write_{tag}", default_value="",
-                                                       width=-200, readonly=True,
-                                                       hint=f"{AREA_NAMES[key]} not selected")
-                                    dpg.add_button(label="File...", tag=f"btn_pick_{tag}", width=80,
-                                                   user_data=key,
-                                                   callback=lambda s, a, u: self.select_write_file(u))
-                                    dpg.add_button(label="Write", tag=f"btn_write_{tag}",
-                                                   width=90, enabled=False, user_data=key,
-                                                   callback=lambda s, a, u: self.start_write(u))
-                                dpg.add_text("", tag=f"status_txt_write_{tag}", color=COL["idle"])
-                            dpg.add_spacer(height=6)
-                            self._header("EXT_CSD FIELDS")
-                            self._build_extcsd_table()
+                                    dpg.add_checkbox(tag="chk_verify_write", default_value=True)
+                                    dpg.add_text(st.S("verify_write"))
+                                with dpg.group(horizontal=True):
+                                    dpg.add_checkbox(tag="chk_erase_before_write", default_value=True)
+                                    dpg.add_text(st.S("erase_before"))
+                                dpg.add_spacer(height=6)
+                                dpg.add_text(st.S("images_folder"), color=COL["accent"])
+                                with dpg.group(horizontal=True):
+                                    folder_input = dpg.add_input_text(tag="txt_write_folder", default_value="",
+                                                                      hint=st.S("no_folder"), width=-130,
+                                                                      readonly=True)
+                                    self._bind_cyr("txt_write_folder")
+                                    dpg.add_button(label=st.S("browse"), tag="btn_select_write_folder",
+                                                   width=110, callback=lambda s, a: self.select_write_folder())
+                                with dpg.group(horizontal=True):
+                                    dpg.add_button(label=st.S("btn_refresh"), tag="btn_refresh_files",
+                                                   callback=lambda s, a: self.refresh_write_files())
+                                    init_btn2 = dpg.add_button(label=st.S("btn_init"),
+                                                               callback=lambda s, a: self.start_analyze())
+                                    self._bind_send(init_btn2)
+                                dpg.add_button(
+                                    label=st.S("btn_write_chip"),
+                                    tag="btn_write_all", width=-1,
+                                    callback=lambda s, a: self.start_write_all(), enabled=False)
+                                dpg.add_text(st.S("write_rules"), color=COL["idle"], wrap=480)
+                                dpg.add_spacer(height=6)
+                                for key, title, tag in (
+                                        ("BOOT1", "BOOT1", "boot1"),
+                                        ("BOOT2", "BOOT2", "boot2"),
+                                        ("USER", "Userdata", "userdata"),
+                                        ("EXTCSD", "EXT_CSD (512 / 544 bytes)", "extcsd")):
+                                    with dpg.group(horizontal=True):
+                                        dpg.add_text(title)
+                                        dpg.add_spacer(width=70)
+                                        file_input = dpg.add_input_text(tag=f"txt_write_{tag}", default_value="",
+                                                                        width=-200, readonly=True,
+                                                                        hint=st.S("not_selected").format(AREA_NAMES[key]))
+                                        self._bind_cyr(f"txt_write_{tag}")
+                                        dpg.add_button(label="File...", tag=f"btn_pick_{tag}", width=80,
+                                                       user_data=key,
+                                                       callback=lambda s, a, u: self.select_write_file(u))
+                                        dpg.add_button(label=st.S("btn_write"), tag=f"btn_write_{tag}",
+                                                       width=90, enabled=False, user_data=key,
+                                                       callback=lambda s, a, u: self.start_write(u))
+                                    dpg.add_text("", tag=f"status_txt_write_{tag}", color=COL["idle"])
+                                    self._bind_cyr(f"status_txt_write_{tag}")
+                                dpg.add_spacer(height=6)
+                                self._header(st.S("extcsd_fields"))
+                                self._build_extcsd_table()
 
-                        with dpg.tab(label="ERASE", tag="sub_erase"):
+                        with dpg.tab(label=st.S("sub_erase"), tag="sub_erase"):
                             dpg.add_spacer(height=6)
-                            self._header("HARDWARE ERASE")
+                            self._header(st.S("hardware_erase"))
                             with dpg.group(horizontal=True):
-                                dpg.add_text("Area:")
-                                dpg.add_combo(["User Area (All)", "BOOT1", "BOOT2", "Custom LBA"],
-                                              tag="erase_target", default_value="User Area (All)",
+                                dpg.add_text(st.S("area"))
+                                dpg.add_combo([st.S("area_user_all"), "BOOT1", "BOOT2", "Custom LBA"],
+                                              tag="erase_target",
+                                              default_value=st.S("area_user_all"),
                                               width=180,
                                               callback=lambda s, a: self.on_erase_target_changed(s, a))
                             with dpg.group(horizontal=True):
-                                dpg.add_text("Start LBA:")
+                                dpg.add_text(st.S("start_lba"))
                                 dpg.add_input_text(tag="erase_start", default_value="0", width=110)
-                                dpg.add_text("End LBA:")
+                                dpg.add_text(st.S("end_lba"))
                                 dpg.add_input_text(tag="erase_end", default_value="0", width=140)
                             dpg.add_spacer(height=8)
-                            erase_btn = dpg.add_button(label="ERASE SELECTED AREA", width=280,
+                            erase_btn = dpg.add_button(label=st.S("btn_erase_area"), width=280,
                                                        height=36, tag="btn_erase_run",
                                                        callback=lambda s, a: self.start_erase())
                             self._bind_reset(erase_btn)
@@ -1670,15 +1768,16 @@ class DpgGui:
                 # RIGHT: journal + progress
                 with dpg.child_window(width=560, border=False):
                     with dpg.group(horizontal=True):
-                        self._header("OPERATION LOG")
+                        self._header(st.S("operation_log"))
                         dpg.add_spacer(width=-1)
-                        dpg.add_button(label="Copy", width=80,
+                        dpg.add_button(label=st.S("btn_copy"), width=80,
                                        callback=lambda s, a: self.copy_log())
-                        dpg.add_button(label="Clear", width=80,
+                        dpg.add_button(label=st.S("btn_clear"), width=80,
                                        callback=lambda s, a: self.clear_log())
                     with dpg.group(horizontal=True):
-                        dpg.add_combo(["All", "INFO", "OK", "WARN", "ERROR"], tag="combo_log_level",
-                                      default_value="All", width=90,
+                        dpg.add_combo([st.S("log_level_all"), "INFO", "OK", "WARN", "ERROR"],
+                                      tag="combo_log_level",
+                                      default_value=st.S("log_level_all"), width=90,
                                       callback=lambda s, a: setattr(self, "_log_dirty", True))
                         dpg.add_input_text(tag="input_log_search", hint="Search in log",
                                            width=-1,
@@ -1687,8 +1786,7 @@ class DpgGui:
                     with dpg.child_window(tag="log_scroll", height=-70, border=True):
                         with dpg.group(tag="log_lines_group"):
                             dpg.add_text("Ready. Select memory and mode.", color=COL["idle"])
-                    if dpg.does_item_exist("font_nerd"):
-                        dpg.bind_item_font("log_lines_group", "font_nerd")
+                    self._bind_cyr("log_lines_group", size="log")
                     # OctoGirl-style: the text bar IS the progress display
                     # (native add_progress_bar removed); width follows the
                     # panel via a resize handler so it spans the same row.
@@ -1700,9 +1798,9 @@ class DpgGui:
                         dpg.add_spacer(width=-1)
                         dpg.add_text("0.00%", tag="progress_percent_text", color=COL["idle"])
                         dpg.add_text("0.00 MiB/s", tag="progress_speed_text", color=COL["idle"])
-                    with dpg.item_handler_registry(tag="progress_resize_handler"):
+                    with dpg.item_handler_registry() as progress_reg:
                         dpg.add_item_resize_handler(callback=self._on_progress_row_resize)
-                    dpg.bind_item_handler_registry("progress_row", "progress_resize_handler")
+                    dpg.bind_item_handler_registry("progress_row", progress_reg)
 
     def _build_extcsd_table(self):
         dpg = self.dpg
@@ -1711,11 +1809,11 @@ class DpgGui:
         labels[160] = "PARTITIONING_SUPPORT (RO)"
         with dpg.table(header_row=True, row_background=True, borders_innerH=True,
                        borders_outerH=True, policy=dpg.mvTable_SizingStretchProp):
-            dpg.add_table_column(label="Field")
-            dpg.add_table_column(label="Chip")
-            dpg.add_table_column(label="File")
-            dpg.add_table_column(label="New")
-            dpg.add_table_column(label="Action")
+            dpg.add_table_column(label=st.S("col_field"))
+            dpg.add_table_column(label=st.S("col_chip"))
+            dpg.add_table_column(label=st.S("col_file"))
+            dpg.add_table_column(label=st.S("col_new"))
+            dpg.add_table_column(label=st.S("col_action"))
             for index in _EXT_FIELD_ORDER:
                 with dpg.table_row():
                     dpg.add_button(label=f"{index} {labels[index]}", tag=f"ext_field_{index}",
@@ -1727,7 +1825,7 @@ class DpgGui:
                                        enabled=False, user_data=index,
                                        callback=lambda s, a, u: self.edit_extcsd_value(u, a))
                     write_btn = dpg.add_button(
-                        label="Read" if index == 160 else "Write",
+                        label=st.S("btn_field_read") if index == 160 else st.S("btn_field_write"),
                         tag=f"ext_write_{index}", width=70, enabled=False, user_data=index,
                         callback=lambda s, a, u: (self.read_extcsd() if u == 160
                                                   else self.write_extcsd(u)))
@@ -1737,16 +1835,18 @@ class DpgGui:
                         self._bind_reset(write_btn)
         dpg.add_text("", tag="txt_extcsd_hint", color=COL["warn"], wrap=480)
         dpg.add_text("", tag="txt_extcsd_source", color=COL["text_dim"], wrap=480)
+        self._bind_cyr("txt_extcsd_source")
         with dpg.group(horizontal=True):
-            dpg.add_button(label="Open file", tag="btn_extcsd_open",
+            dpg.add_button(label=st.S("btn_open_file"), tag="btn_extcsd_open",
                            callback=lambda s, a: self.open_extcsd(compare=False))
-            dpg.add_button(label="Compare", tag="btn_extcsd_compare",
+            dpg.add_button(label=st.S("btn_compare"), tag="btn_extcsd_compare",
                            callback=lambda s, a: self.open_extcsd(compare=True))
-            dpg.add_button(label="Save snapshot", tag="btn_extcsd_save",
+            dpg.add_button(label=st.S("btn_save_snapshot"), tag="btn_extcsd_save",
                            callback=lambda s, a: self.save_extcsd())
         dpg.add_spacer(height=4)
-        with dpg.child_window(height=140, border=True):
+        with dpg.child_window(height=520, border=True):
             dpg.add_text("", tag="txt_extcsd_dump", wrap=520)
+        self._bind_cyr("txt_extcsd_dump")
 
     # ------------------------------------------------------------------
     # Run

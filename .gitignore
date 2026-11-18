@@ -13,3 +13,5 @@ uvx.exe
 uv.zip
 logs/
 temp/
+bin/
+.lang.cfg
