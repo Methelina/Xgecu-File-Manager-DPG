@@ -1,13 +1,24 @@
 <#
 .SYNOPSIS
-    Xgecu Prog launcher.
+    Xgecu Prog Launcher by Soror L.'.L.'.
     Version: 2.1.0
-    Updated: 2026-11-18
+    Updated: 2026-11-19
 
 .DESCRIPTION
-    Checks xgecu_env (delegates to install_xgecu_prog.ps1 when missing),
-    kills stale processes from a previous run, sets environment variables
-    and starts gui_dpg.py. -Legacy starts the Kivy gui.py instead.
+    Patchnote v2.1.0 (Soror L.'.L.'.):
+      [*] Rewritten from conda env\ to uv venv xgecu_env
+          (Scripts\python.exe) in step with install_xgecu_prog.ps1 v2.x.
+      [+] Auto-install: missing environment delegates to
+          install_xgecu_prog.ps1 instead of hard exit.
+      [+] uv/pip/TMP cache isolation matching the installer.
+    Patchnote v1.1.0 (Soror L.'.L.'.):
+      [+] Zombie-kill of stale Xgecu Prog python.exe (project-local exe
+          path or window title 'Xgecu') before launch: orphaned instances
+          keep T48 USB handles open. Own ancestors are never touched.
+      [+] Console auto-close 15 s after exit, any key cancels.
+    Patchnote v1.0.0 (Soror L.'.L.'.):
+      [+] Initial release: env check, PYTHONUNBUFFERED=1, -Legacy switch
+          for the Kivy gui.py during the DearPyGui migration.
 #>
 
 param(
@@ -105,10 +116,10 @@ if ($zombiePids.Count -gt 0) {
 Set-Location $ROOT
 if ($Legacy) {
     Write-Host "[INFO] Launcher: Starting legacy Kivy GUI (gui.py)..." -ForegroundColor Yellow
-    & $PYTHON "-X" "utf8" "gui.py"
+    & $PYTHON "-X" "utf8" "src\gui.py"
 } else {
     Write-Host "[INFO] Launcher: Starting Xgecu Prog (DearPyGui)..." -ForegroundColor Cyan
-    & $PYTHON "-X" "utf8" "gui_dpg.py"
+    & $PYTHON "-X" "utf8" "src\gui_dpg.py"
 }
 $exitCode = $LASTEXITCODE
 

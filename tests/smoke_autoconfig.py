@@ -1,3 +1,5 @@
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'src'))
 """Read-only auto detection: selection, fallback, identity, STOP and GUI."""
 from types import SimpleNamespace
 from threading import Event
@@ -64,7 +66,7 @@ print("PASS: auto mode ranking, fallback, data/identity mismatch, voltage and ST
 from kivy.lang import Builder
 from kivy.clock import Clock
 from gui import MainScreen
-Builder.load_file("gui.kv")
+Builder.load_file(str(Path(__file__).resolve().parents[1] / "src" / "gui.kv"))
 screen = MainScreen()
 standard = screen.emmc_clock
 screen.set_emmc_preset("Авто")

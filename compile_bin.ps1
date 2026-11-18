@@ -1,14 +1,20 @@
 <#
 .SYNOPSIS
-    Build the DearPyGui frontend into bin\T48_eMMC_dpg_v<version>.exe.
-    Version: 1.0.0
+    Xgecu Prog Build Script by Soror L.'.L.'.
+    Version: 1.1.0
     Updated: 2026-11-19
 
 .DESCRIPTION
-    Requires xgecu_env with pyinstaller installed (install_xgecu_prog.ps1
-    installs the runtime; add pyinstaller via
-      uv pip install --python xgecu_env\Scripts\python.exe pyinstaller
-    or run this script with -InstallBuildDeps).
+    Patchnote v1.1.0 (Soror L.'.L.'.):
+      [*] Fixed onefile output path: EXE lands in distpath root, not in a
+          T48_eMMC_dpg subfolder (build reported "exe not found" after a
+          successful PyInstaller run).
+      [*] -InstallBuildDeps installs PyInstaller 6.22.3 into xgecu_env
+          via uv; build refuses to run without it.
+    Patchnote v1.0.0 (Soror L.'.L.'.):
+      [+] Initial release: builds bin\T48_eMMC_dpg_v<version>.exe from
+          T48_eMMC_dpg.spec; version from .version.cfg; build artifacts
+          isolated in .cache\pyinstaller*; bin\ excluded from git.
 #>
 
 param(

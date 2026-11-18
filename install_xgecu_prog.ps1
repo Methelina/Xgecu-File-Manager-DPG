@@ -1,17 +1,28 @@
 <#
 .SYNOPSIS
-    Xgecu Prog portable installer & launcher (uv-based).
+    Xgecu Prog Installer & Portable Launcher by Soror L.'.L.'.
     Version: 2.1.0
-    Updated: 2026-11-18
+    Updated: 2026-11-19
 
 .DESCRIPTION
-    Portable, idempotent setup:
-      - uv.exe is downloaded into the project root;
-      - uv/pip/TMP caches are isolated inside .cache;
-      - venv xgecu_env (Python 3.11) is created by uv, python.exe is
-        also exposed as xgecu_env\python.exe (hardlink);
-      - dependencies are installed from requirements.txt via uv pip.
-    Menu: install, run, reinstall, exit.
+    Patchnote v2.1.0 (Soror L.'.L.'.):
+      [*] Rewritten from conda to portable uv: uv.exe downloaded into the
+          project root, caches isolated in .cache.
+      [+] Menu: install / run (DPG or legacy Kivy) / reinstall / exit.
+      [+] Font set check in assets\fonts with fallback warning.
+      [+] Critical import check (dearpygui, PIL, kivy) into logs\install.log.
+      [+] Stale-process kill by xgecu_env python path and 'Xgecu' window
+          title at install start; broken env quarantine by rename.
+    Patchnote v2.0.0 (Soror L.'.L.'.):
+      [+] Conda replaced by uv; xgecu_env via "uv venv --python 3.11"
+          with python.exe hardlink for env\python.exe path compatibility.
+      [+] uv release URL fixed to github.com/astral-sh/uv (releases.astral.sh
+          mirror returned 404 HTML silently).
+      [*] uv pip does not know --no-warn-script-location: dropped.
+      [-] Conda dependency removed (Miniforge/Anaconda no longer required).
+    Patchnote v1.0.0 (Soror L.'.L.'.):
+      [+] Initial release: env conda env, requirements install, folder and
+          font checks, T48 WinUSB driver note.
 #>
 
 $ScriptPath = $PSScriptRoot
@@ -91,12 +102,44 @@ function Invoke-UvPipInstall {
 # ==========================================================
 # Install
 # ==========================================================
+function Kill-StaleProcesses {
+    # Orphaned Xgecu Prog instances hold T48 USB handles and env files.
+    # Match by project-local xgecu_env python.exe path or by a window
+    # title containing 'Xgecu'. Own ancestors are never touched.
+    Write-Status "Killing stale Xgecu Prog processes..." "INFO"
+    foreach ($p in @(Get-CimInstance Win32_Process -Filter "name='python.exe'" -ErrorAction SilentlyContinue)) {
+        if ($p.ExecutablePath -and $p.ExecutablePath.ToLower().StartsWith($ScriptPath.ToLower()) -and $p.ExecutablePath.ToLower().Contains("xgecu_env")) {
+            Write-Status "Killing stale process: PID=$($p.ProcessId)"
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Get-Process -Name python -ErrorAction SilentlyContinue |
+        Where-Object { $_.MainWindowTitle -match 'Xgecu' } |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+}
+
 function Install-XgecuProg {
     param([bool]$Reinstall = $false)
+
+    Kill-StaleProcesses
 
     if ($Reinstall) {
         Write-Status "Reinstall: removing existing environment..." "WARN"
         if (Test-Path $EnvName) { Remove-Item -Path $EnvName -Recurse -Force }
+        if (Test-Path $EnvName) {
+            # loaded DLLs keep a broken env undeletable; quarantine by rename
+            $quar = "$EnvName.broken.$(Get-Random)"
+            try {
+                Rename-Item -Path $EnvName -NewName $quar -ErrorAction Stop
+                Write-Status "Undeletable broken environment quarantined as $quar." "WARN"
+                Write-Status "Delete that folder manually once no process uses it." "WARN"
+            } catch {
+                Write-Status "Environment files are in use (running Xgecu Prog, IDE or an open terminal in xgecu_env)." "ERROR"
+                Write-Status "Close them and run Reinstall again." "ERROR"
+                return $false
+            }
+        }
     }
 
     # ---- 0. uv ----
@@ -133,6 +176,21 @@ function Install-XgecuProg {
     $PythonVersion = "3.11"
     $EnvDirPath = Join-Path $ScriptPath $EnvName
     if (-not (Test-Path (Join-Path $EnvDirPath "Scripts\python.exe"))) {
+        # leftover of a broken/aborted install - remove before uv venv,
+        # which refuses to reuse an existing directory; quarantine on lock
+        if (Test-Path $EnvDirPath) {
+            Remove-Item -Path $EnvDirPath -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $EnvDirPath) {
+                $quar = "$EnvDirPath.broken.$(Get-Random)"
+                try {
+                    Rename-Item -Path $EnvDirPath -NewName $quar -ErrorAction Stop
+                    Write-Status "Undeletable broken environment quarantined as $quar." "WARN"
+                } catch {
+                    Write-Status "Broken environment at $EnvDirPath cannot be removed - files in use." "ERROR"
+                    return $false
+                }
+            }
+        }
         Write-Status "Creating virtual environment ($EnvName, Python $PythonVersion)..." "INFO"
         & $UvExePath venv $EnvDirPath --python $PythonVersion
         if ($LASTEXITCODE -ne 0) {
@@ -229,9 +287,9 @@ function Start-XgecuProg {
     Set-Location $ScriptPath
     $env:PYTHONUNBUFFERED = "1"
     if ($Legacy) {
-        & $PythonExePath "-X" "utf8" "gui.py"
+        & $PythonExePath "-X" "utf8" "src\gui.py"
     } else {
-        & $PythonExePath "-X" "utf8" "gui_dpg.py"
+        & $PythonExePath "-X" "utf8" "src\gui_dpg.py"
     }
     return $true
 }

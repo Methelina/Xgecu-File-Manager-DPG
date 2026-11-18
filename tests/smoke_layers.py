@@ -1,10 +1,12 @@
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'src'))
 # Быстрый smoke-тест чистых слоёв без железа.
 import io, sys
 sys.stdout.reconfigure(encoding="utf-8")
 from modes.emmc import partitions, registers, report as report_mod, protocol as P
 
 # 1. Парсинг реального gpt.bin (34 сектора: MBR + header + entries)
-with open("gpt.bin", "rb") as f:
+with open(pathlib.Path(__file__).resolve().parents[1] / "assets" / "fixtures" / "gpt.bin", "rb") as f:
     buf = f.read()
 fake_dev = {0: buf}          # маппинг base -> данные
 def sample(lba, n):
@@ -46,7 +48,7 @@ print("\n".join(txt.splitlines()[:20]))
 
 # 3. Скаттер-парсер
 import scatter_to_gpt as s2g
-with open("MT6768_Android_scatter.txt", "r", encoding="utf-8", errors="ignore") as f:
+with open(pathlib.Path(__file__).resolve().parents[1] / "assets" / "fixtures" / "MT6768_Android_scatter.txt", "r", encoding="utf-8", errors="ignore") as f:
     data = f.read()
 pro = s2g.parse_mtk_scatter(data)
 print("\n== Scatter parse: разделов =", len(pro), "| первые:", [p["name"] for p in pro[:5]])

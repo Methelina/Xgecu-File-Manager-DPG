@@ -3,7 +3,7 @@ from kivy_deps import sdl2, glew, angle
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('gui.kv', '.'), ('assets', 'assets')]
+datas = [('src/gui.kv', '.'), ('assets', 'assets')]
 binaries = []
 hiddenimports = ['modes.emmc.autoconfig']
 tmp_ret = collect_all('kivy_deps.sdl2')
@@ -15,14 +15,14 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['gui.py'],
-    pathex=[],
+    ['src/gui.py'],
+    pathex=['src'],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=['packaging_runtime.py'],
+    runtime_hooks=['src/packaging_runtime.py'],
     excludes=[],
     noarchive=False,
     optimize=0,

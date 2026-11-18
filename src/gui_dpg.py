@@ -1,10 +1,41 @@
-"""Xgecu Prog - DearPyGui frontend.
+"""Xgecu Prog DearPyGui frontend by Soror L.'.L.'.
+Version: 2.1.0
+Updated: 2026-11-19
 
-Entry point: python gui_dpg.py
-Backend (orchestrator, modes/, t48_usb) is shared with the legacy Kivy gui.py.
+Entry point: python src/gui_dpg.py [--demo | -Legacy]
+Backend (orchestrator, modes/, t48_usb) is shared with the legacy Kivy
+gui.py. UI strings are localized via strings.py (RU/EN); journal lines
+arrive from the backend as-is.
 
-UI strings are Latin-only; Cyrillic log text is rendered with the
-Cyrillic-capable fonts (font_chat / font_nerd).
+Patchnote v2.1.0 (Soror L.'.L.'.):
+  [+] RU/EN localization: strings.py, RU/EN buttons in the title row,
+      full window rebuild on switch; RU renders in VCR OSD Mono RUS.
+  [+] Status lamp (OctoGirl CrisTical pattern) pinned to the title row
+      via a stretch table: probed with legacy XGecuT48.open() at 1 s,
+      INIT/ERROR states; demo cycles states every 5 s.
+  [+] Text progress bar with a dedicated bar font (DejaVu Sans Mono,
+      U+25B0/U+25B1) replacing the native progress bar; width follows
+      the panel via a resize handler.
+  [+] Windows-style multi-row partition selection (click / Ctrl+click /
+      Shift+click range) with per-selection DUMP/WRITE/ERASE.
+  [*] Fixed lang-switch rebuild (duplicate-tag crashes that dropped the
+      NAND/SPI tabs) and the _rebuild_table method lost in a rewrite.
+Patchnote v2.0.0 (Soror L.'.L.'.):
+  [+] Layout refactor: core moved to src/, project-root resolvers for
+      assets/.version.cfg/.lang.cfg (dev vs frozen).
+  [+] Kernel synced with upstream: benchmark/firmware/rpmb/service
+      modules now importable; --demo scripted chip read moved in from
+      tests.
+Patchnote v1.1.0 (Soror L.'.L.'.):
+  [+] EXT_CSD table with per-field read/write, file compare, modal OTP
+      confirmations (162/178) replacing tkinter; blocking plan confirm.
+  [+] Journal with level filter, search, per-line coloring and copy from
+      the full buffer; progress overlay percent and MiB/s.
+Patchnote v1.0.0 (Soror L.'.L.'.):
+  [+] Initial DPG frontend: CrisTical dark theme (OctoGirl palette),
+      font system (ModeSeven/VCR/JetBrains NF with Cyrillic remap),
+      EMMC/NAND/SPI tabs, READ/WRITE/ERASE sub-tabs, thread bridge
+      queue -> frame callback, _gui_ready guard.
 """
 
 import queue
@@ -17,12 +48,20 @@ import strings as st
 from modes.emmc.write_files import AREA_NAMES, find_write_files
 from modes.emmc import protocol as P
 
-FONTS_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
-ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+def _project_root():
+    # dev: src/gui_dpg.py with assets/.version.cfg in the project root;
+    # frozen: resources unpack next to __file__ (PyInstaller datas)
+    here = Path(__file__).resolve().parent
+    return here.parent if here.name == "src" else here
+
+
+_PROJECT_ROOT = _project_root()
+FONTS_DIR = _PROJECT_ROOT / "assets" / "fonts"
+ASSETS_DIR = _PROJECT_ROOT / "assets"
 
 
 def _load_version():
-    cfg = Path(__file__).resolve().parent / ".version.cfg"
+    cfg = _PROJECT_ROOT / ".version.cfg"
     try:
         text = cfg.read_text(encoding="utf-8").strip()
         return text if text else "0.0.0"
@@ -35,7 +74,7 @@ APP_TITLE = f"Xgecu Prog v{APP_VERSION}"
 
 
 def _load_lang():
-    cfg = Path(__file__).resolve().parent / ".lang.cfg"
+    cfg = _PROJECT_ROOT / ".lang.cfg"
     try:
         lang = cfg.read_text(encoding="utf-8").strip().lower()
         return lang if lang in ("ru", "en") else "en"
@@ -44,7 +83,7 @@ def _load_lang():
 
 
 def _save_lang(lang):
-    cfg = Path(__file__).resolve().parent / ".lang.cfg"
+    cfg = _PROJECT_ROOT / ".lang.cfg"
     try:
         cfg.write_text(lang + "\n", encoding="utf-8")
     except OSError:

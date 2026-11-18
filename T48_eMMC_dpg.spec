@@ -8,8 +8,8 @@ tmp_ret = collect_all('dearpygui')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 a = Analysis(
-    ['gui_dpg.py'],
-    pathex=[],
+    ['src/gui_dpg.py'],
+    pathex=['src'],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

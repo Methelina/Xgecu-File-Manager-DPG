@@ -67,7 +67,7 @@ def main():
             digest.update(data)
         result.update(bytes_read=64 * P.CHUNK_BYTES, sha256=digest.hexdigest(),
                       first_32_sha256=first_digest, read_seconds=round(time.monotonic()-read_started, 3))
-        output = Path(__file__).with_name("probe_preset_read_results.json")
+        output = Path(__file__).resolve().parents[2] / "cfg" / "probe_preset_read_results.json"
         history = json.loads(output.read_text(encoding="utf-8")) if output.exists() else []
         references = [r for r in history if r.get("ok") and r.get("clock") == 8 and r.get("cid") == cid.hex()]
         if references:
@@ -87,7 +87,7 @@ def main():
             except Exception as exc:
                 result["close_error"] = str(exc)
         result["seconds"] = round(time.monotonic()-started, 3)
-        output = Path(__file__).with_name("probe_preset_read_results.json")
+        output = Path(__file__).resolve().parents[2] / "cfg" / "probe_preset_read_results.json"
         history = json.loads(output.read_text(encoding="utf-8")) if output.exists() else []
         history.append(result)
         output.write_text(json.dumps(history, indent=2), encoding="utf-8")

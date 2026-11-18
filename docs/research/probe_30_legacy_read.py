@@ -70,7 +70,7 @@ if __name__=="__main__":
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--repeats",type=int,default=5,choices=range(1,11))
     args=p.parse_args()
-    output=Path(__file__).with_name("probe_30_legacy_read_results.json")
+    output=Path(__file__).resolve().parents[2] / "cfg" / "probe_30_legacy_read_results.json"
     results=[]
     baseline=None
     for i in range(args.repeats+1):

@@ -1,3 +1,5 @@
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'src'))
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch, MagicMock
@@ -355,7 +357,7 @@ with TemporaryDirectory(dir=".") as folder:
 
 from kivy.lang import Builder
 from gui import MainScreen
-Builder.load_file("gui.kv")
+Builder.load_file(str(Path(__file__).resolve().parents[1] / "src" / "gui.kv"))
 screen = MainScreen()
 assert not screen.verify_read and screen.verify_write
 assert screen.erase_before_write
@@ -370,4 +372,4 @@ screen.operation_running = True
 assert screen.ids.chk_verify_read.disabled and screen.ids.chk_verify_write.disabled
 print("PASS: streamed comparisons, 50-message cap, EOF/short USB, cancellation, all read/write routes, sparse regions, restart/CID, GUI flags")
 import runpy
-runpy.run_path("smoke_layers.py", run_name="__main__")
+runpy.run_path(str(Path(__file__).resolve().parents[1] / "tests" / "smoke_layers.py"), run_name="__main__")

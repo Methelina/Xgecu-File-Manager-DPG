@@ -17,24 +17,24 @@
 Запускайте из `emmc_continue`, каждый отдельным процессом. Это важно из-за глобальных настроек protocol.py и состояния Kivy.
 
 ```powershell
-..\venv\Scripts\python.exe -X utf8 smoke_layers.py
-..\venv\Scripts\python.exe -X utf8 smoke_stop.py
-..\venv\Scripts\python.exe -X utf8 smoke_autoconfig.py
-..\venv\Scripts\python.exe -X utf8 smoke_extcsd.py
-..\venv\Scripts\python.exe -X utf8 smoke_verification.py
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_layers.py
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_stop.py
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_autoconfig.py
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_extcsd.py
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_verification.py
 ```
 
 Тесты используют mocks/fixtures для операций и не предназначены для реальной записи в чип. Некоторые открывают окно Kivy и требуют графическую среду Windows. Не путайте их с исследовательскими probe-скриптами, которые могут обращаться к реальному T48.
 
 | Тест | Что проверяет | Последний сохранённый результат |
 |---|---|---|
-| smoke_layers.py | GPT fixture, регистры/отчёт, scatter, сборщики протокола | PASS при подготовке документации |
+| tests/smoke_layers.py | GPT fixture, регистры/отчёт, scatter, сборщики протокола | PASS при подготовке документации |
 | smoke_stop.py | Pending USB, освобождение, следующая задача, завершение объявленного потока, отложенный abort | PASS при подготовке документации |
 | smoke_autoconfig.py | Ранжирование/откат, сравнение данных и identity, VCCQ, STOP, GUI | Логика PASS; GUI assertion FAIL |
 | smoke_extcsd.py | Снимки/файлы, поля, план, OTP, полная запись и readback | FAIL на проверке цвета до более поздних сценариев |
 | smoke_verification.py | Сравнение, короткие чтения, ошибки, STOP, erase, пропуски, перезапуск/CID, флаги GUI | PASS после исправления restart; в ходе документации не повторялся |
 
-`smoke_verification.py` в конце сам запускает `smoke_layers.py`. Повторный отдельный PASS слоёв не даёт дополнительного покрытия аппаратной записи.
+`tests\smoke_verification.py` в конце сам запускает `smoke_layers.py`. Повторный отдельный PASS слоёв не даёт дополнительного покрытия аппаратной записи.
 
 ## 3. Известные падения тестов
 
@@ -54,7 +54,7 @@
 
 ### STOP при THGA на 8 и 30 МГц
 
-Лог: [hardware_stop_8_30_20261030_151523.log](../hardware_stop_8_30_20261030_151523.log).
+Лог: [hardware_stop_8_30_20261030_151523.log](../logs/hardware_stop_8_30_20261030_151523.log).
 
 Проверены два положения STOP внутри потока на каждой частоте: порции 3 и 31. В каждом случае завершались все 64 порции текущего 1-МиБ потока, следующий поток не начинался; затем прошли повторное открытие, чтение и новая запись с readback без переподключения T48.
 
@@ -86,15 +86,15 @@
 
 ### Короткие чтения 30 МГц
 
-[probe_30_legacy_read_results.json](../probe_30_legacy_read_results.json) и [исследование](../clock_investigation.md) описывают 5 успешных запусков с сравнением 1 МиБ против 8 МГц на соответствующем чипе. Частота и ширина шины прибором не измерялись. Короткий тест не доказывает устойчивость всей ёмкости.
+[probe_30_legacy_read_results.json](../cfg/probe_30_legacy_read_results.json) и [исследование](../clock_investigation.md) описывают 5 успешных запусков с сравнением 1 МиБ против 8 МГц на соответствующем чипе. Частота и ширина шины прибором не измерялись. Короткий тест не доказывает устойчивость всей ёмкости.
 
 ## 5. Неуспешная длинная запись
 
 Логи:
 
-- [hardware_optimized_20261030_142147.log](../hardware_optimized_20261030_142147.log): 30 МГц, сбой инициализации, данные не отправлены.
-- [hardware_checked_usb_20261030_143257.log](../hardware_checked_usb_20261030_143257.log): T48 недоступен/занят, запись не началась.
-- [hardware_optimized_8mhz_20261030_142817.log](../hardware_optimized_8mhz_20261030_142817.log): анализ 3 ГиБ, стирание User Area, контроль первых 32 МиБ; прежний длинный поток завершился тайм-аутом.
+- [hardware_optimized_20261030_142147.log](../logs/hardware_optimized_20261030_142147.log): 30 МГц, сбой инициализации, данные не отправлены.
+- [hardware_checked_usb_20261030_143257.log](../logs/hardware_checked_usb_20261030_143257.log): T48 недоступен/занят, запись не началась.
+- [hardware_optimized_8mhz_20261030_142817.log](../logs/hardware_optimized_8mhz_20261030_142817.log): анализ 3 ГиБ, стирание User Area, контроль первых 32 МиБ; прежний длинный поток завершился тайм-аутом.
 
 Последний опыт относится к реализации до ограничения завершённых потоков до 1 МиБ. Счётчик отправленных байтов в диагностике не доказывает их программирование в eMMC. Образ имел FF-область, а чип стирался в 00, поэтому карта не давала пропусков. **Полной успешной аппаратной верификации 3 ГиБ нет.**
 

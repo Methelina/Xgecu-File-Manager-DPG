@@ -1,11 +1,14 @@
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'src'))
 """Offline checks for EXT_CSD inspection; no USB device is opened."""
 import ast
 from pathlib import Path
 from unittest.mock import patch
 
-for path in ("gui.py", "orchestrator.py", "modes/emmc_mode.py",
-             "modes/emmc/operations.py", "modes/emmc/extcsd.py"):
-    ast.parse(Path(path).read_text(encoding="utf-8-sig"))
+_root = Path(__file__).resolve().parents[1]
+for path in ("src/gui.py", "src/orchestrator.py", "src/modes/emmc_mode.py",
+             "src/modes/emmc/operations.py", "src/modes/emmc/extcsd.py"):
+    ast.parse((_root / path).read_text(encoding="utf-8-sig"))
 
 from modes.emmc.extcsd import validate, describe, compare
 
@@ -66,7 +69,7 @@ with patch.object(operations, "EmmcSession", FakeSession):
 import gui
 from kivy.lang import Builder
 
-Builder.load_file("gui.kv")
+Builder.load_file(str(Path(__file__).resolve().parents[1] / "src" / "gui.kv"))
 screen = gui.MainScreen()
 assert not screen.ids.emmc_sub_tabs.has_screen("sub_extcsd")
 screen._show_extcsd(data, "test")
@@ -95,7 +98,7 @@ from modes.emmc import protocol as P
 from modes.emmc.session import EmmcSession
 from tempfile import TemporaryDirectory
 
-sample = Path(__file__).resolve().parent / "tests" / "fixtures" / "extcsd_sample.bin"
+sample = Path(__file__).resolve().parent / "fixtures" / "extcsd_sample.bin"
 raw = sample.read_bytes()
 loaded, tail = load_file(sample)
 assert loaded == raw[:512] and tail == raw[512:] and len(tail) == 32

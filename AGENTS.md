@@ -13,23 +13,33 @@
 Проверенная структура рабочей копии:
 
 ```text
-F:\XGecu_prog\
-  venv\Scripts\python.exe
-  emmc_continue\
-    gui.py
-    gui.kv
+K:\work\ChipTune\Xgecu-File-Manager-DPG\
+  xgecu_env\Scripts\python.exe      (uv, создаётся install_xgecu_prog.ps1)
+  src\
+    gui_dpg.py                      (точка входа DearPyGui-фронтенда)
+    gui.py, gui.kv                  (легаси Kivy-фронтенд, до завершения миграции)
     orchestrator.py
     t48_usb.py
     image_processor.py
+    scatter_to_gpt.py
+    strings.py                      (RU/EN локализация UI)
+    ui_log.py, ui_theme.py
+    packaging_runtime.py
     modes\emmc_mode.py
     modes\emmc\
-    assets\
-    docs\
-    T48_eMMC.spec
-    packaging_runtime.py
-    smoke_*.py
-    dist\T48_eMMC.exe
+    assets\, docs\, tests\, cfg\
+  install_xgecu_prog.ps1, run_xgecu_prog.ps1, compile_bin.ps1 (+ .bat)
+  .version.cfg, .lang.cfg
+  T48_eMMC_dpg.spec, T48_eMMC.spec
+  requirements.txt, requirements-build.txt
+  tests\smoke_*.py
+  docs\research\ (probe-скрипты, исследования)
+  logs\ (hardware-логи), cfg\ (probe JSON и настройки)
+  bin\T48_eMMC_dpg_v<ver>.exe
+  uv.exe, uvx.exe
 ```
+
+Все внутренние импорты предполагают `src\` в `sys.path`: запуск точки входа из `src\` даёт это автоматически, smoke-скрипты вставляют shim.
 
 Это известное расположение данной копии, а не универсальный путь установки. В удалённой сессии сначала подтвердите рабочую папку средствами клиента. Не используйте пути файловой системы сервера агента для операций на компьютере пользователя.
 
@@ -73,22 +83,22 @@ F:\XGecu_prog\
 
 | Модуль | Что менять здесь |
 |---|---|
-| `gui.py`, `gui.kv` | Интерфейс, свойства, действия, диалоги, привязки |
-| `ui_theme.py` | Палитры, семантика цвета, контраст |
-| `ui_log.py` | Уровни, фильтр, безопасная подсветка журнала |
-| `orchestrator.py` | Сериализация задач, STOP, последовательность полных операций |
-| `modes/emmc_mode.py` | Совместимый фасад драйвера |
-| `modes/emmc/operations.py` | Операции с файлами/областями и проверки перед изменением данных |
-| `modes/emmc/session.py` | Жизненный цикл T48/eMMC, регистры, потоки |
-| `modes/emmc/protocol.py` | Константы, команды и упаковка полей |
-| `modes/emmc/autoconfig.py` | Выбор проверенного режима и кеш |
-| `modes/emmc/verification.py` | Сравнение readback с регионами файла |
-| `modes/emmc/extcsd.py` | Валидация байтов, сравнение, план настроек |
-| `modes/emmc/write_files.py` | Выбор файлов и проверка размеров |
-| `modes/emmc/partitions.py` | GPT/MBR, сигнатуры ФС |
-| `modes/emmc/registers.py`, `report.py` | Декодирование и отчёт |
-| `image_processor.py` | Карта RAW и частично реализованного Sparse |
-| `t48_usb.py` | WinUSB, дескрипторы, тайм-ауты, отмена |
+| `src\gui.py`, `src\gui.kv` | Интерфейс, свойства, действия, диалоги, привязки |
+| `src\ui_theme.py` | Палитры, семантика цвета, контраст |
+| `src\ui_log.py` | Уровни, фильтр, безопасная подсветка журнала |
+| `src\orchestrator.py` | Сериализация задач, STOP, последовательность полных операций |
+| `src\modes\emmc_mode.py` | Совместимый фасад драйвера |
+| `src\modes\emmc\operations.py` | Операции с файлами/областями и проверки перед изменением данных |
+| `src\modes\emmc\session.py` | Жизненный цикл T48/eMMC, регистры, потоки |
+| `src\modes\emmc\protocol.py` | Константы, команды и упаковка полей |
+| `src\modes\emmc\autoconfig.py` | Выбор проверенного режима и кеш |
+| `src\modes\emmc\verification.py` | Сравнение readback с регионами файла |
+| `src\modes\emmc\extcsd.py` | Валидация байтов, сравнение, план настроек |
+| `src\modes\emmc\write_files.py` | Выбор файлов и проверка размеров |
+| `src\modes\emmc\partitions.py` | GPT/MBR, сигнатуры ФС |
+| `src\modes\emmc\registers.py`, `report.py` | Декодирование и отчёт |
+| `src\image_processor.py` | Карта RAW и частично реализованного Sparse |
+| `src\t48_usb.py` | WinUSB, дескрипторы, тайм-ауты, отмена |
 
 Не вставляйте блокирующий USB-обмен в GUI-поток. Не дублируйте hex-команды в обработчиках кнопок. Общие изменения поведения должны проходить через существующий слой операций/сессии, а не через отдельный обход только для одной кнопки.
 
@@ -231,15 +241,17 @@ F:\XGecu_prog\
 
 ## 13. Команды и окружение
 
-Из каталога emmc_continue в PowerShell:
+Из корня проекта в PowerShell (uv-окружение):
 
 ```powershell
-..\venv\Scripts\python.exe -X utf8 gui.py
-..\venv\Scripts\python.exe -X utf8 smoke_layers.py
-..\venv\Scripts\python.exe -X utf8 smoke_stop.py
-..\venv\Scripts\python.exe -X utf8 smoke_verification.py
-..\venv\Scripts\python.exe -X utf8 smoke_autoconfig.py
-..\venv\Scripts\python.exe -X utf8 smoke_extcsd.py
+xgecu_env\Scripts\python.exe -X utf8 src\gui_dpg.py           # основной GUI (DPG)
+xgecu_env\Scripts\python.exe -X utf8 src\gui_dpg.py --demo    # демо без оборудования
+xgecu_env\Scripts\python.exe -X utf8 src\gui.py               # легаси Kivy GUI
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_layers.py
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_stop.py
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_verification.py
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_autoconfig.py
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_extcsd.py
 ```
 
 Каждый smoke запускайте отдельным процессом: они меняют глобальные настройки и создают GUI. Они используют mocks/fixtures и не являются разрешением запускать аппаратные probe-скрипты.
@@ -275,10 +287,10 @@ F:\XGecu_prog\
 ## 15. Сборка и проверка EXE
 
 ```powershell
-..\venv\Scripts\python.exe -m PyInstaller --noconfirm T48_eMMC.spec
+powershell -NoProfile -ExecutionPolicy Bypass -File compile_bin.ps1 -InstallBuildDeps
 ```
 
-Основной результат — dist/T48_eMMC.exe, onefile/windowed. Spec включает gui.kv, assets, Kivy dependencies, hidden import autoconfig, runtime hook и ICO.
+Основной результат — bin/T48_eMMC_dpg_v<ver>.exe (spec T48_eMMC_dpg.spec, onefile/windowed, версия из .version.cfg). Spec включает src\, assets, .version.cfg, dearpygui; kivy/numpy исключены. Легаси spec T48_eMMC.spec собирает dist/T48_eMMC.exe (Kivy-фронтенд) и поддерживается до конца миграции.
 
 Сохраняйте `packaging_runtime.py`: он устраняет `site.USER_BASE is None` при frozen-запуске Kivy dependencies. Ресурсы разрешаются относительно `__file__`; не заменяйте это зависимостью от текущего каталога.
 

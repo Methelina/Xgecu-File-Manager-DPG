@@ -34,7 +34,7 @@
 Из существующего окружения:
 
 ```powershell
-..\venv\Scripts\python.exe -X utf8 gui.py
+xgecu_env\Scripts\python.exe -X utf8 src\gui.py
 ```
 
 Проверенный вариант использует Windows с рабочим OpenGL-драйвером. Переносимость текущего USB-слоя на Linux/macOS не реализована: используются winreg, kernel32 и winusb.

@@ -1,80 +1,123 @@
 # Xgecu Prog
 
-Xgecu Prog — приложение для прямой работы с eMMC через программатор XGecu T48 в Windows. Графический интерфейс написан на Python/Kivy, обмен с T48 — через WinUSB. Основной рабочий каталог этой версии — `emmc_continue`; одноимённые файлы в родительских каталогах не являются её точкой входа.
+Xgecu Prog is a Windows application for working with eMMC chips through the
+XGecu T48 programmer. The active frontend is DearPyGui; a legacy Kivy
+frontend is kept until the migration is finished. The T48 link is WinUSB
+(libwdi/Zadig driver), no vendor DLLs are involved.
 
-Документация описывает проверенный по исходникам срез от **30 октября 2026 года**. У проекта здесь нет присвоенного номера релиза; дата не заменяет версию или идентификатор сборки.
+Supported platforms: Windows 10/11 x64. Fully portable runtime - the
+project brings its own Python 3.11 (via uv), no system Python is required.
 
-## Навигация
+## Quick start
 
-| Документ | Содержание |
-|---|---|
-| [Руководство пользователя](docs/USER_GUIDE.md) | Подключение, интерфейс, чтение, запись, стирание, журнал, STOP |
-| [Операции и форматы](docs/OPERATIONS.md) | Геометрия, RAW/Sparse, оптимизация, проверка данных, границы операций |
-| [EXT_CSD](docs/EXT_CSD.md) | Файлы 512/544 байта, изменяемые поля, подтверждения, порядок записи |
-| [Архитектура и протокол](docs/ARCHITECTURE.md) | Модули, фоновые задачи, WinUSB, сессии, команды, программный API |
-| [Запуск и сборка](docs/BUILD.md) | Окружение, зависимости, PyInstaller, ресурсы и иконка |
-| [Проверки и аппаратные результаты](docs/TESTING.md) | Smoke-тесты, фактические результаты, подтверждённое и непроверенное |
-| [Диагностика и ограничения](docs/TROUBLESHOOTING.md) | Ошибки подключения, CSD, тайм-ауты, ограничения и незавершённые возможности |
-| [Исследовательские материалы](docs/RESEARCH.md) | Частоты, архив 40 МГц, результаты опытов, статический анализ прошивки |
-
-## Возможности
-
-- Инициализация eMMC, чтение CID/CSD/EXT_CSD и отчёта о чипе.
-- Автоподбор пресета и частоты по регистрам и повторному чтению User Area.
-- Чтение и запись BOOT1, BOOT2 и всей User Area; последовательные полные операции.
-- Разбор GPT/MBR и операции над диапазонами разделов.
-- Стирание перед записью, контроль стирания, пропуск заполнения 00/FF после стирания.
-- Потоковая верификация после перезапуска eMMC.
-- Работа с выбранными настройками EXT_CSD и их проверка чтением.
-- Светлая/тёмная темы, фильтрация журнала, прогресс, управляемый STOP.
-
-NAND и SPI представлены в интерфейсе как режимы в разработке. Отображение HS200/HS400 в отчёте означает возможности чипа, а не наличие таких режимов обмена в приложении. Поддержка 40 МГц удалена.
-
-## Быстрый старт
-
-1. Запустите `dist\T48_eMMC.exe` либо запустите `gui.py` из исходников по [инструкции](docs/BUILD.md).
-2. Проверьте подключение и соответствие VCCQ чипу. Начальные настройки GUI: VCCQ 1.8 V, 4-bit, пресет «Авто».
-3. Нажмите «Инит eMMC». Проверьте идентификацию, ёмкость и выбранный режим в журнале.
-4. Для резервной копии используйте «Полное чтение» и пустую папку. Это сохраняет BOOT1, BOOT2 и User Area; EXT_CSD сохраняется отдельно.
-5. Для восстановления откройте вкладку «Запись», выберите образы, проверьте размеры. Верификация и стирание перед записью включены по умолчанию.
-6. Дождитесь итогов в журнале. STOP останавливает дальнейшую работу, но не откатывает выполненные изменения.
-
-**Userdata в этом приложении — вся аппаратная User Area eMMC**, включая разметку и находящиеся в ней разделы. Это не только Android-раздел с именем `userdata`.
-
-При включённом предварительном стирании удаляется вся выбранная область, в том числе остаток после меньшего образа. Проверка стирания ограничена первыми 32 МиБ для больших областей. Верификация RAW проверяет весь объём файла, включая пропущенное заполнение; остаток области за концом файла в неё не входит.
-
-## Структура рабочей версии
-
-```text
-emmc_continue/
-  gui.py, gui.kv              интерфейс
-  orchestrator.py            фоновые задачи и полные операции
-  t48_usb.py                 WinUSB и отмена ввода-вывода
-  image_processor.py         карта образа RAW/частично Sparse
-  modes/emmc_mode.py         фасад драйвера
-  modes/emmc/                протокол, сессии, операции, регистры
-  assets/                    шрифт, SVG, PNG и ICO
-  smoke_*.py                 проверки без записи на оборудование
-  T48_eMMC.spec              основная сборка
-  packaging_runtime.py       runtime hook Kivy
-  dist/T48_eMMC.exe          собранное приложение
-  docs/                      подробная документация
+```bat
+install_xgecu_prog.bat
+run_xgecu_prog.bat
 ```
 
-Исследовательские `probe_*.py`, JSON, логи и материалы Ghidra описаны отдельно. Они не являются обычным пользовательским сценарием. Прошивка T48 для работы этой версии не изменялась.
+The installer downloads a portable `uv.exe` into the project root, creates
+the `xgecu_env` virtual environment (Python 3.11), installs dependencies
+and checks fonts and critical imports. The launcher starts the app and
+kills stale instances that hold the T48 USB handle.
 
-## Статус достоверности
+Demo mode without hardware:
 
-Документация различает поведение кода, программные тесты и аппаратные измерения. Автоподбор проверяет чтение нескольких участков, но не гарантирует успешную запись всего чипа. THGA Legacy 30 МГц остаётся экспериментальным режимом; физическая частота и ширина шины прибором не измерялись. Полная аппаратная верификация образа 3 ГиБ не завершена.
+```bat
+xgecu_env\Scripts\python.exe -X utf8 src\gui_dpg.py --demo
+```
 
-В [разделе проверок](docs/TESTING.md) перечислены два текущих падения тестов GUI. Они не скрыты и не исправлялись в рамках написания документации.
+## Features
 
-Чат, где можно обсуждать разработку, пообщаться с разработчиком и коллегами - https://t.me/+7QS2hWrlAFw1Nzgy
+- eMMC init with auto-tuning of presets/clocks (8/16/20/30 MHz; 30 MHz
+  experimental for THGA), CID/CSD/EXT_CSD readback.
+- GPT/MBR layout parse with per-partition dump/write/erase; multi-row
+  selection (click / Ctrl+click / Shift+click range).
+- Read/write of BOOT1, BOOT2 and the whole User Area; sequential full
+  operations with verification.
+- Erase before write, erase verification, RAW skip of 00/FF fill after
+  verified erase.
+- EXT_CSD: 512/544-byte files, per-field write with readback
+  confirmation, OTP dialogs for irreversible fields (162/178).
+- RU/EN interface switch, colored operation journal with filter/search,
+  status lamp (ONLINE/INIT/ERROR) probing the device like the INIT path.
+- STOP support: bounded write streams, abort only outside an active
+  stream.
 
-Поддержать разработку -
+NAND and SPI are placeholders. HS200/HS400 and 40 MHz modes are removed.
 
-💳Тбанк - https://www.tbank.ru/cf/5xFGZshymTA
+## Layout
 
-💳Сбер - https://messenger.online.sberbank.ru/sl/b64OEIJdaiBKMQ5W3
+```text
+src/                       application code
+  gui_dpg.py               DearPyGui frontend (entry point, --demo flag)
+  gui.py, gui.kv           legacy Kivy frontend (migration in progress)
+  orchestrator.py          task serialization, STOP, operation streams
+  modes/emmc/              session, protocol, operations, extcsd, registers
+  strings.py               RU/EN string table
+assets/                    fonts, logo, icons, fixtures (gpt.bin, scatters)
+cfg/                       probe JSON results and settings
+logs/                      hardware logs, install.log
+tests/                     smoke tests (run per file, mocked, no hardware)
+docs/                      USER_GUIDE, OPERATIONS, EXT_CSD, ARCHITECTURE,
+                           BUILD, TESTING, TROUBLESHOOTING, RESEARCH
+docs/research/             probe scripts and investigations
+bin/                       built EXE (gitignored)
+xgecu_env/, .cache/, uv.exe, uvx.exe   portable runtime (gitignored)
+```
 
-💳Любая карта - https://tips.tips/000491446
+## Building
+
+```bat
+compile_bin.ps1 -InstallBuildDeps
+```
+
+Produces `bin\T48_eMMC_dpg_v<version>.exe` (onefile, windowed; version
+from `.version.cfg`). The legacy Kivy build (`T48_eMMC.spec` ->
+`dist\T48_eMMC.exe`) is still supported. See [docs/BUILD.md](docs/BUILD.md).
+
+## Tests
+
+```bat
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_layers.py
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_stop.py
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_verification.py
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_autoconfig.py
+xgecu_env\Scripts\python.exe -X utf8 tests\smoke_extcsd.py
+```
+
+All smokes are mocked and safe: no hardware writes. Current status and
+hardware evidence are tracked in [docs/TESTING.md](docs/TESTING.md).
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [User guide](docs/USER_GUIDE.md) | UI, init, read, write, erase, journal, STOP |
+| [Operations](docs/OPERATIONS.md) | formats, RAW/Sparse, boundaries, erase control |
+| [EXT_CSD](docs/EXT_CSD.md) | 512/544-byte files, writable fields, OTP dialogs |
+| [Architecture](docs/ARCHITECTURE.md) | layers, threads, WinUSB, STOP model |
+| [Build](docs/BUILD.md) | environment, dependencies, PyInstaller |
+| [Testing](docs/TESTING.md) | smoke tests, factual results |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | known errors and limitations |
+| [Research](docs/RESEARCH.md) | probes, archived 40 MHz modes |
+
+## Safety notes
+
+- **Userdata means the whole hardware User Area**, not only the Android
+  `userdata` partition.
+- Erase covers the whole selected area, including the tail after a
+  smaller image. RAW verification compares the entire file.
+- EXT_CSD fields 162/178 are irreversible; the app asks for explicit
+  confirmation and verifies by readback.
+- The developers work with the hardware directly; the app reports what it
+  verified and does not claim what it did not.
+
+## Support
+
+Telegram (developer chat): https://t.me/+7QS2hWrlAFw1Nzgy
+
+Donations:
+
+- T-Bank: https://www.tbank.ru/cf/5xFGZshymTA
+- Sber: https://messenger.online.sberbank.ru/sl/b64OEIJdaiBKMQ5W3
+- Tips: https://tips.tips/000491446

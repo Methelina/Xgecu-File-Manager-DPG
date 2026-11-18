@@ -19,13 +19,13 @@
 
 | Материалы | Назначение |
 |---|---|
-| `probe_preset_read.py` | Проверка чтением доступных пресетов 8/16/20/30 |
-| `probe_30_legacy_read.py` и JSON | Повторные короткие чтения Legacy против эталона 8 МГц |
+| `docs/research/probe_preset_read.py` | Проверка чтением доступных пресетов 8/16/20/30 |
+| `docs/research/probe_30_legacy_read.py` и JSON | Повторные короткие чтения Legacy против эталона 8 МГц |
 | `probe_clock_matrix*`, `probe_stage_clock*` | Сочетания конфигураций и селекторов init/CID/CSD |
 | `probe_high_speed*`, `probe_hs_recovery*` | Переключения HS_TIMING и восстановление |
 | `probe_skip_csd*`, `probe_thga_*boundary*` | Локализация отказов CSD/EXT_CSD и режимов timing |
 | `probe_40*`, `probe_thga_40*` | Архив исключённого режима 40 МГц |
-| `hardware_*.log` | Фактические этапы аппаратных операций, включая ошибки |
+| `logs/hardware_*.log` | Фактические этапы аппаратных операций, включая ошибки |
 | `decode_t48_firmware.py`, `t48_firmware_decoded.*` | Декодирование файла обновления и отчёт |
 | `t48_decompiled.c`, `t48_disassembly.txt`, `t48_*handlers*`, `t48_usb_surface.txt` | Статический анализ обработчиков |
 | `T48*.java`, `t48_*.gpr`, `t48_*.rep` | Скрипты и проекты Ghidra |
@@ -41,7 +41,7 @@
 Пример синтаксиса из рабочего каталога:
 
 ```powershell
-..\venv\Scripts\python.exe -X utf8 probe_preset_read.py --clock 8 --preset THGA
+xgecu_env\Scripts\python.exe -X utf8 docs\research\probe_preset_read.py --clock 8 --preset THGA
 ```
 
 Прежде чем использовать другую частоту, изучите код, проверку эталона и путь сохранения результатов. Успешный короткий SHA-256 на одном участке подтверждает только этот участок при данных условиях.
