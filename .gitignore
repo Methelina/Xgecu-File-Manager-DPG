@@ -1,0 +1,15 @@
+recon/
+env/
+.venv/
+.cache/
+xgecu_env/
+__pycache__/
+*.pyc
+build/
+dist/
+
+uv.exe
+uvx.exe
+uv.zip
+logs/
+temp/

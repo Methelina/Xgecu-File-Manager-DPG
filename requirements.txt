@@ -1,4 +1,8 @@
 # Runtime dependencies (Windows, Python 3.11)
+# dearpygui serves gui_dpg.py; Kivy lines are kept only while the
+# legacy gui.py is supported and are removed at the end of the
+# DearPyGui migration.
+dearpygui==2.3
 Kivy==2.3.1
 kivy_deps.sdl2==0.8.0
 kivy_deps.glew==0.3.1
