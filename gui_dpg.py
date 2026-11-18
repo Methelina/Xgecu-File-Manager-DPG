@@ -8,6 +8,8 @@ Cyrillic-capable fonts (font_chat / font_nerd).
 """
 
 import queue
+import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +18,19 @@ from modes.emmc import protocol as P
 
 FONTS_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+
+
+def _load_version():
+    cfg = Path(__file__).resolve().parent / ".version.cfg"
+    try:
+        text = cfg.read_text(encoding="utf-8").strip()
+        return text if text else "0.0.0"
+    except OSError:
+        return "0.0.0"
+
+
+APP_VERSION = _load_version()
+APP_TITLE = f"Xgecu Prog v{APP_VERSION}"
 
 _LOG_VIEW_LINES = 400
 _EXT_FIELD_ORDER = (177, 178, 179, 162, 160)
@@ -35,6 +50,7 @@ COL = {
     "frame_bg": (40, 42, 50),
     "text": (220, 220, 220),
     "text_dim": (140, 145, 155),
+    "lba_blue": (110, 160, 255),
     "idle": (110, 110, 110),
     "header": (50, 50, 80),
     "accent": (255, 200, 100),
@@ -48,9 +64,12 @@ COL = {
     "reset_btn": (70, 40, 40),
     "reset_hover": (120, 50, 50),
     "reset_active": (90, 30, 30),
-    "selection_bg": (105, 85, 45),
-    "selection_hover": (130, 105, 55),
-    "selection_active": (95, 75, 38),
+    "selection_bg": (45, 40, 29),        # 2D281D
+    "selection_hover": (70, 62, 43),
+    "selection_active": (58, 51, 36),
+    "lamp_online": (76, 175, 80),
+    "lamp_init": (255, 200, 100),
+    "lamp_error": (211, 47, 47),
 }
 
 
@@ -108,6 +127,11 @@ class DpgGui:
         self.progress_value = 0.0
         self.progress_speed = 0.0
         self.progress_status = "Ready"
+        self._bar_width = 24
+        self._lamp_state = "OFFLINE"
+        self._lamp_error_ts = 0.0
+        self._lamp_poll_ts = 0.0
+        self.firmware_text = "-"
         self.boot_size_bytes = 0
         self.user_total_sectors = 0
 
@@ -171,14 +195,108 @@ class DpgGui:
         except queue.Empty:
             pass
 
+    @staticmethod
+    def _find_bar_font():
+        """Locate a monospace font carrying the U+25B0/U+25B1 parallelograms.
+        JetBrains Mono NF lacks them (block elements only); DejaVu Sans Mono
+        and Cascadia cover the range."""
+        candidates = [
+            FONTS_DIR / "DejaVuSansMono.ttf",
+            Path(r"C:\Windows\Fonts\DejaVuSansMono.ttf"),
+            Path(r"C:\Windows\Fonts\CascadiaCodeNF.ttf"),
+            Path(r"C:\Windows\Fonts\CascadiaMono.ttf"),
+            Path(r"C:\Windows\Fonts\HackNerdFont-Regular.ttf"),
+        ]
+        for p in candidates:
+            if p.is_file():
+                return p
+        return None
+
+    _bar_font_path = None
+
+    @classmethod
+    def _bar_font_ready(cls):
+        return cls._bar_font_path is not None
+
+    @classmethod
+    def _bar(cls, frac, width=24):
+        # OctoGirl text-bar style: [▰▰▱▱▱▱▱▱▱▱] 20% rendered via the
+        # dedicated bar font; without it: '#'/'.' degradation.
+        full, empty = ("▰", "▱") if cls._bar_font_ready() else ("#", ".")
+        frac = max(0.0, min(1.0, frac))
+        filled = int(round(frac * width))
+        return "[{}{}] {:3.0f}%".format(full * filled, empty * (width - filled),
+                                        frac * 100)
+
+    def _on_progress_row_resize(self, sender, app_data):
+        # DejaVu Sans Mono advance at 14 px is ~8.4 px per glyph; keep
+        # room for the percent + speed labels on the same row.
+        dpg = self.dpg
+        try:
+            w = dpg.get_item_rect_size("progress_row")[0]
+        except SystemError:
+            return
+        self._bar_width = max(10, min(80, int((w - 180) / 8.4)))
+        dpg.set_value("progress_textbar", self._bar(self.progress_value / 100.0,
+                                                    self._bar_width))
+
+    def _update_lamp(self):
+        # CrisTical status-circle lamp (OctoGirl pattern). ONLINE/OFFLINE are
+        # probed with the same XGecuT48.open() call the legacy INIT path uses
+        # (throttled to 1 s, idle only - never while an operation owns USB);
+        # INIT is shown while an operation runs, ERROR for 10 s after a
+        # failure journal line.
+        dpg = self.dpg
+        if not dpg.does_item_exist("t48_lamp"):
+            return
+        now = time.perf_counter()
+        if now - self._lamp_poll_ts < 1.0:
+            return
+        self._lamp_poll_ts = now
+        if isinstance(self.orchestrator, DemoOrchestrator):
+            # demo: cycle OFFLINE -> ONLINE -> INIT -> ERROR every 5 s,
+            # no real USB probing
+            cycle = [("OFFLINE", COL["lamp_error"]), ("ONLINE", COL["lamp_online"]),
+                     ("INIT", COL["lamp_init"]), ("ERROR", COL["lamp_error"])]
+            state, color = cycle[int(now / 5.0) % len(cycle)]
+            self._set_lamp(state, color)
+            return
+        if self.operation_running:
+            state, color = "INIT", COL["lamp_init"]
+        elif now - self._lamp_error_ts < 10.0:
+            state, color = "ERROR", COL["lamp_error"]
+        else:
+            try:
+                from t48_usb import XGecuT48
+                probe = XGecuT48()
+                online = probe.open()
+                if online:
+                    probe.close()
+            except Exception:
+                online = False
+            state, color = ("ONLINE", COL["lamp_online"]) if online \
+                else ("OFFLINE", COL["lamp_error"])
+        self._set_lamp(state, color)
+
+    def _set_lamp(self, state, color):
+        dpg = self.dpg
+        self._lamp_state = state
+        dpg.configure_item("t48_lamp", fill=color + (255,))
+        dpg.set_value("t48_state_value", state)
+        dpg.configure_item("t48_state_value", color=color)
+        dpg.set_value("t48_fw_value", f"{self.firmware_text} v.")
+        dpg.configure_item("t48_fw_value", color=color)
+
     def _update_status_widgets(self):
         dpg = self.dpg
         if not dpg.does_item_exist("status_phase"):
             return
         self._refresh_log_view_if_dirty()
+        self._update_lamp()
         dpg.set_value("status_phase", self.progress_status)
-        dpg.configure_item("operation_progress", default_value=self.progress_value / 100.0,
-                           overlay="{:.2f}%".format(self.progress_value))
+        dpg.set_value("progress_textbar", self._bar(self.progress_value / 100.0,
+                                                    self._bar_width))
+        dpg.set_value("progress_percent_text", "{:.2f}%".format(self.progress_value))
         dpg.set_value("progress_speed_text", "{:.2f} MiB/s".format(self.progress_speed))
 
     def _drain_queue(self):
@@ -202,6 +320,10 @@ class DpgGui:
         if message.startswith(("... Progress:", "... Erased:", "... Written:", "... Wrote segment [")):
             return
         self._append_log_line(message)
+        if message.startswith(("[+]",)):
+            self._lamp_error_ts = 0.0
+        elif message.startswith(("[-]",)) or "ERROR" in message:
+            self._lamp_error_ts = time.perf_counter()
         lower = message.lower()
         if message.startswith(("[!]", "[-]")):
             if any(w in lower for w in ("stop", "interrupt", "cancel", "aborted")):
@@ -1043,27 +1165,40 @@ class DpgGui:
 
     def _file_dialog(self, title, save=False, directory=False, extensions=None,
                      default_filename="", callback=None):
-        dpg = self.dpg
-        self._dlg_seq += 1
-        fd_tag = f"file_dlg_{self._dlg_seq}"
+        # Native Windows dialogs through tkinter (familiar to the user),
+        # same withdraw/topmost pattern the legacy Kivy gui used. The
+        # call blocks the DPG render loop until the dialog closes, which
+        # is safe: nothing else in the GUI is interactive while a file
+        # operation is being set up.
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        try:
+            if directory:
+                path = filedialog.askdirectory(title=title)
+            elif save:
+                ext = (extensions or [".bin"])[0].lstrip(".")
+                path = filedialog.asksaveasfilename(
+                    title=title, initialfile=default_filename,
+                    defaultextension="." + ext,
+                    filetypes=self._filetypes(extensions))
+            else:
+                path = filedialog.askopenfilename(
+                    title=title, filetypes=self._filetypes(extensions))
+        finally:
+            root.destroy()
+        if path:
+            callback(path)
 
-        def _accepted(sender, app_data):
-            if isinstance(app_data, dict):
-                selections = app_data.get("selections") or {}
-                if selections:
-                    callback(next(iter(selections.values())))
-
-        def _cancelled(*_a):
-            pass
-
-        with dpg.file_dialog(directory_selector=bool(directory), modal=True, label=title,
-                             width=700, height=450, tag=fd_tag,
-                             default_filename=default_filename if save else "",
-                             cancel_callback=_cancelled, callback=_accepted):
-            for ext in (extensions or []):
-                dpg.add_file_extension("." + ext.lstrip("."), color=COL["accent"])
-            if extensions and not directory:
-                dpg.add_file_extension(".*", color=COL["text_dim"])
+    @staticmethod
+    def _filetypes(extensions):
+        if not extensions:
+            return [("All files", "*.*")]
+        pairs = [("Images", " ".join("*" + e.lstrip(".") for e in extensions))]
+        pairs.append(("All files", "*.*"))
+        return pairs
 
     def _confirm(self, message, on_yes, danger=False):
         dpg = self.dpg
@@ -1128,7 +1263,18 @@ class DpgGui:
                 dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (85, 100, 120))
                 dpg.add_theme_color(dpg.mvThemeCol_FrameBg, COL["frame_bg"])
                 dpg.add_theme_color(dpg.mvThemeCol_Text, COL["text"])
-                dpg.add_theme_color(dpg.mvThemeCol_Header, COL["header"])
+                # Header drives the selected/hovered background of selectables
+                # (partition rows): amber, not the legacy bluish header.
+                dpg.add_theme_color(dpg.mvThemeCol_Header, COL["selection_bg"])
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, COL["selection_hover"])
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, COL["selection_active"])
+                # tabs: amber selected/unfocused, dimmed otherwise
+                dpg.add_theme_color(dpg.mvThemeCol_TabSelected, COL["send_btn"])
+                dpg.add_theme_color(dpg.mvThemeCol_TabHovered, COL["send_hover"])
+                dpg.add_theme_color(dpg.mvThemeCol_Tab, COL["frame_bg"])
+                dpg.add_theme_color(dpg.mvThemeCol_TabUnfocused, COL["frame_bg"])
+                dpg.add_theme_color(dpg.mvThemeCol_TabUnfocusedActive, (35, 55, 35))
+                dpg.add_theme_color(dpg.mvThemeCol_TabDimmedSelected, COL["send_btn"])
                 dpg.add_theme_color(dpg.mvThemeCol_TitleBg, COL["window_bg"])
                 dpg.add_theme_color(dpg.mvThemeCol_PopupBg, (30, 32, 40))
                 dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 4)
@@ -1208,7 +1354,7 @@ class DpgGui:
                     dpg.add_text(part.get("name", "(unnamed)"))
                     dpg.add_text(part.get("fs", "?"), color=COL["ok"])
                     dpg.add_text(f"{part.get('first', 0)}..{part.get('last', 0)}",
-                                 color=COL["text_dim"])
+                                 color=COL["lba_blue"])
                     dpg.add_text(size_txt, color=COL["warn"])
             self._apply_row_selection()
 
@@ -1246,6 +1392,13 @@ class DpgGui:
                             dpg.add_char_remap(i, biglet)
                             dpg.add_char_remap(i + alph_len, biglet + alph_len)
                             biglet += 1
+                    bar_font = DpgGui._find_bar_font()
+                    if bar_font:
+                        with dpg.font(str(bar_font), 14, tag="font_bar"):
+                            pass
+                        DpgGui._bar_font_path = bar_font
+                    else:
+                        DpgGui._bar_font_path = None
             if dpg.does_item_exist("font_body"):
                 dpg.bind_font("font_body")
             else:
@@ -1265,10 +1418,13 @@ class DpgGui:
     def build(self):
         dpg = self.dpg
         with dpg.texture_registry(show=False):
-            logo_path = ASSETS_DIR / "xgecu_prog.png"
+            logo_path = ASSETS_DIR / "xgecu_prog_cool2.png"
+            if not logo_path.is_file():
+                logo_path = ASSETS_DIR / "xgecu_prog.png"
             if logo_path.is_file():
                 from PIL import Image
                 img = Image.open(logo_path).convert("RGBA")
+                self._logo_ratio = img.size[0] / img.size[1]
                 dpg.add_dynamic_texture(img.size[0], img.size[1],
                                         [b / 255.0 for b in img.tobytes("raw", "RGBA")],
                                         tag="logo_tex")
@@ -1280,14 +1436,37 @@ class DpgGui:
                         no_scrollbar=True):
             dpg.set_primary_window("main_window", True)
 
-            # header: logo + title
-            with dpg.child_window(height=62, border=False, no_scrollbar=True):
-                with dpg.group(horizontal=True):
-                    if dpg.does_item_exist("logo_tex"):
-                        dpg.add_image("logo_tex", height=44)
-                    title = dpg.add_text("XGECU PROG - T48 eMMC FLASHER", color=COL["accent"])
-                    if dpg.does_item_exist("font_header"):
-                        dpg.bind_item_font(title, "font_header")
+            # header
+            with dpg.child_window(tag="header_child", height=62, border=False,
+                                  no_scrollbar=True):
+                with dpg.table(tag="header_table", header_row=False, borders_innerH=False,
+                               borders_outerH=False, context_menu_in_body=False,
+                               policy=dpg.mvTable_SizingFixedFit):
+                    dpg.add_table_column(width_stretch=True, init_width_or_weight=1)
+                    dpg.add_table_column(width_fixed=True, init_width_or_weight=470,
+                                         no_resize=True)
+                    with dpg.table_row():
+                        with dpg.group(horizontal=True):
+                            if dpg.does_item_exist("logo_tex"):
+                                logo_h = 44
+                                logo_w = int(logo_h * getattr(self, "_logo_ratio", 1.0))
+                                dpg.add_image("logo_tex", height=logo_h, width=logo_w)
+                            title = dpg.add_text(f"XGECU PROG v{APP_VERSION} - T48 eMMC FLASHER",
+                                                 color=COL["accent"])
+                            if dpg.does_item_exist("font_header"):
+                                dpg.bind_item_font(title, "font_header")
+                        with dpg.group(horizontal=True):
+                            dpg.add_spacer(width=-1)
+                            with dpg.drawlist(width=16, height=16):
+                                dpg.draw_circle(center=(8, 8), radius=5, tag="t48_lamp",
+                                                color=COL["text"] + (255,),
+                                                fill=COL["lamp_error"] + (255,))
+                            dpg.add_spacer(width=6)
+                            dpg.add_text("XGecu State:")
+                            dpg.add_text("OFFLINE", tag="t48_state_value", color=COL["lamp_error"])
+                            dpg.add_spacer(width=10)
+                            dpg.add_text("Firmware:")
+                            dpg.add_text("-", tag="t48_fw_value", color=COL["idle"])
 
             # mode tabs
             with dpg.child_window(border=False, height=-56, no_scrollbar=True):
@@ -1298,6 +1477,8 @@ class DpgGui:
                         dpg.add_text("NAND Flash mode is under development", color=COL["idle"])
                     with dpg.tab(label="SPI [SOON]", tag="tab_spi"):
                         dpg.add_text("SPI Flash mode is under development", color=COL["idle"])
+                for tab_tag in ("tab_emmc", "tab_nand", "tab_spi"):
+                    pass
 
             # bottom bar: state + STOP
             with dpg.child_window(height=50, border=False, no_scrollbar=True):
@@ -1324,7 +1505,7 @@ class DpgGui:
                 dpg.add_key_down_handler(key, callback=_set_flag("_mod_ctrl", True))
                 dpg.add_key_release_handler(key, callback=_set_flag("_mod_ctrl", False))
 
-        dpg.create_viewport(title="Xgecu Prog", width=1280, height=820, resizable=True)
+        dpg.create_viewport(title=APP_TITLE, width=1280, height=820, resizable=True)
         icon_path = ASSETS_DIR / "xgecu_prog.ico"
         if icon_path.is_file():
             try:
@@ -1508,9 +1689,20 @@ class DpgGui:
                             dpg.add_text("Ready. Select memory and mode.", color=COL["idle"])
                     if dpg.does_item_exist("font_nerd"):
                         dpg.bind_item_font("log_lines_group", "font_nerd")
-                    dpg.add_progress_bar(tag="operation_progress", default_value=0.0,
-                                         width=-1, height=14, overlay="0.00%")
-                    dpg.add_text("0.00 MiB/s", tag="progress_speed_text", color=COL["idle"])
+                    # OctoGirl-style: the text bar IS the progress display
+                    # (native add_progress_bar removed); width follows the
+                    # panel via a resize handler so it spans the same row.
+                    with dpg.group(horizontal=True, tag="progress_row"):
+                        textbar = dpg.add_text("[▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱]   0%",
+                                               tag="progress_textbar", color=COL["accent"])
+                        if dpg.does_item_exist("font_bar"):
+                            dpg.bind_item_font(textbar, "font_bar")
+                        dpg.add_spacer(width=-1)
+                        dpg.add_text("0.00%", tag="progress_percent_text", color=COL["idle"])
+                        dpg.add_text("0.00 MiB/s", tag="progress_speed_text", color=COL["idle"])
+                    with dpg.item_handler_registry(tag="progress_resize_handler"):
+                        dpg.add_item_resize_handler(callback=self._on_progress_row_resize)
+                    dpg.bind_item_handler_registry("progress_row", "progress_resize_handler")
 
     def _build_extcsd_table(self):
         dpg = self.dpg
@@ -1563,17 +1755,35 @@ class DpgGui:
     def stop_operation(self):
         self.orchestrator.stop_operation()
 
-    def run(self):
-        from orchestrator import AppOrchestrator
+    def _demo_tick(self):
+        orch = self.orchestrator
+        if isinstance(orch, DemoOrchestrator):
+            orch.tick()
+        else:
+            self._drain_queue()
+        if self.dpg.is_dearpygui_running():
+            self.dpg.set_frame_callback(self.dpg.get_frame_count() + 1, self._demo_tick)
+
+    def run(self, demo=False):
         dpg = self.dpg
-        self.orchestrator = AppOrchestrator(
-            log_cb=self.log_cb, table_cb=self.table_cb, task_cb=self.task_cb,
-            progress_cb=self.progress_cb, phase_cb=self.phase_cb)
         dpg.create_context()
+        if demo:
+            self.orchestrator = DemoOrchestrator(self)
+        else:
+            from orchestrator import AppOrchestrator
+            self.orchestrator = AppOrchestrator(
+                log_cb=self.log_cb, table_cb=self.table_cb, task_cb=self.task_cb,
+                progress_cb=self.progress_cb, phase_cb=self.phase_cb)
         self.build()
-        self._append_log_line("[+] Xgecu Prog started (DearPyGui frontend).")
-        self._append_log_line("[*] Press INIT EMMC to probe the chip.")
+        if demo:
+            self._append_log_line("[+] DEMO MODE: hardware calls are simulated.")
+            self._append_log_line("[*] Press INIT EMMC to run the scripted chip read.")
+        else:
+            self._append_log_line("[+] Xgecu Prog started (DearPyGui frontend).")
+            self._append_log_line("[*] Press INIT EMMC to probe the chip.")
         self._log_dirty = True
+        if demo:
+            dpg.set_frame_callback(dpg.get_frame_count() + 1, self._demo_tick)
         try:
             while dpg.is_dearpygui_running():
                 dpg.render_dearpygui_frame()
@@ -1581,9 +1791,181 @@ class DpgGui:
             dpg.destroy_context()
 
 
+# ======================================================================
+# Demo mode (--demo): scripted chip read through the real GUI callbacks.
+# ======================================================================
+
+_SECTOR = 512
+
+_DEMO_LAYOUT_ENTRIES = [
+    ("preloader", 0, 4096), ("pgpt", 0, 34),
+    ("misc", 32768, 512), ("countrycode", 557056, 1024),
+    ("para", 2654208, 512), ("expdb", 3178496, 8192),
+    ("frp", 24150016, 8192), ("gsort", 25198592, 16384),
+    ("ffu", 41975808, 8192), ("cust", 50364416, 131072),
+    ("blk1", 2197848064, 16384), ("rescue", 2206236672, 16384),
+    ("vbmeta_a", 2340454400, 64), ("vbmeta_system_a", 2348843008, 64),
+    ("vbmeta_vendor_a", 2357231616, 64), ("vbmeta_b", 2365620224, 64),
+    ("vbmeta_system_b", 2374008832, 64), ("vbmeta_vendor_b", 2382397440, 64),
+    ("md_udc", 2390786048, 2048), ("metadata", 2414485504, 32768),
+    ("nvcfg", 2448039936, 30720), ("nvdata", 2481594368, 65536),
+    ("persist", 2548703232, 49152), ("protect1", 2599034880, 8192),
+    ("protect2", 2607423488, 8192), ("seccfg", 2617245696, 512),
+    ("md1img_a", 2625634304, 24576), ("spmfw_a", 2759852032, 512),
+    ("scp_a", 2760900608, 512), ("sspm_a", 2767192064, 512),
+    ("gz_a", 2768240640, 1024), ("lk_a", 2785017856, 512),
+    ("boot_a", 2789212160, 65536), ("vendor_boot_a", 2856321024, 65536),
+    ("dtbo_a", 2923429888, 1024), ("tee_a", 2931818496, 1024),
+    ("sec1", 2944401408, 512), ("proinfo", 2946498560, 3072),
+    ("efuse", 2949644288, 512), ("naf_token", 2952562688, 2048),
+    ("hw_aikey", 2954536960, 512), ("otp", 2956511232, 512),
+    ("mcf_log", 2958485504, 8192), ("reserved1", 2960410624, 16384),
+    ("sp_data", 2962337792, 262144), ("reserved2", 2964966144, 131072),
+    ("reserved3", 2967593472, 131072), ("unk", 2970220800, 512),
+    ("super", 2972145920, 33554432), ("custpack", 3276062720, 1048576),
+    ("tctpersist", 3286620160, 2048), ("metadata_nvme", 3288622080, 16384),
+    ("userdata", 3290112000, 24556346880 // _SECTOR),
+]
+
+_DEMO_FS_BY_NAME = {
+    "boot_a": "Android boot", "vendor_boot_a": "Android boot",
+    "super": "f2fs/dm", "userdata": "f2fs/dm", "custpack": "f2fs/dm",
+    "metadata": "ext4", "sp_data": "ext4",
+    "preloader": "raw", "pgpt": "raw", "misc": "raw", "para": "raw",
+    "seccfg": "raw", "lk_a": "raw",
+}
+
+
+class DemoOrchestrator:
+    """Orchestrator stand-in: INIT EMMC replays a scripted chip read
+    (real MT6768 scatter layout, synthetic EXT_CSD) through the same
+    GUI callbacks the backend uses; other run_* calls report idle."""
+
+    def __init__(self, gui):
+        self._gui = gui
+        self._dpg = gui.dpg
+        self._events = []
+        self._cursor = 0
+        self._start = None
+
+    def set_mode(self, mode):
+        pass
+
+    def stop_operation(self):
+        self._gui.log_cb("[*] STOP: demo mode, nothing to stop.")
+
+    def run_read_info(self, voltage, bus, result_cb=None):
+        if self._start is not None:
+            self._gui.log_cb("[*] INIT EMMC: demo already ran; restart to replay.")
+            return
+        self._build_scenario()
+        self._start = self._dpg.get_frame_count()
+
+    def __getattr__(self, name):
+        if name.startswith("run_"):
+            def _demo(*args, **kwargs):
+                self._gui.log_cb("[!] Demo mode: only the INIT EMMC scenario is scripted.")
+            return _demo
+        raise AttributeError(name)
+
+    def _build_scenario(self):
+        gui = self._gui
+        events = self._events
+        at = lambda rel, fn: events.append((rel, fn))
+        log = lambda msg: (lambda: gui.log_cb(msg))
+        snapshot = self._build_extcsd_snapshot()
+        user_sectors = 0x03A00000   # 29.0 GiB User Area
+
+        at(0, log("[*] INIT EMMC: T48 discovery..."))
+        at(3, log("[+] T48 found (WinUSB), firmware version 22.09.14"))
+        at(5, lambda: gui.task_cb(True))
+        at(6, lambda: gui.phase_cb("image analyze"))
+        at(6, log("[*] Analyzing: reading CID/CSD/EXT_CSD..."))
+        for i in range(7, 37, 6):
+            at(i, lambda p=(i - 7) / 30 * 100.0: gui.progress_cb(p, 3.2 + 0.3 * (i % 7)))
+        at(21, log("[*] Candidate check: 8 MHz, 4-bit, VCCQ 1.8 V"))
+        at(31, log("[+] Candidate accepted: CID match, head/mid/tail reads OK"))
+        at(37, lambda: gui.progress_cb(100.0, 3.0))
+        at(39, log("[+] Analyze complete. Preset: standard, 30 MHz, 4-bit, VCCQ 1.8 V"))
+
+        def layout():
+            parts = [{"is_table": True, "name": "Layout (GPT)", "fs": "GPT",
+                      "first": 0, "last": 33, "size": 34 * _SECTOR / 1024 / 1024}]
+            for name, start_bytes, sectors in _DEMO_LAYOUT_ENTRIES:
+                first = start_bytes // _SECTOR
+                parts.append({"name": name, "fs": _DEMO_FS_BY_NAME.get(name, "ext4"),
+                              "first": first, "last": first + sectors - 1,
+                              "size": sectors * _SECTOR / 1024 / 1024})
+            gui.table_cb(parts, boot_bytes=4 * 1024 * 1024,
+                         user_mb=user_sectors * _SECTOR // (1024 * 1024),
+                         user_sectors=user_sectors)
+        at(42, layout)
+        at(42, log("[+] GPT layout: 54 partitions, User Area 29.0 GiB, BOOT 4 MiB each"))
+
+        def apply_extcsd():
+            cid = snapshot[512:528]
+            gui._extcsd_settings = gui._connection_settings()
+            gui._show_extcsd(snapshot[:512], "Analyze: CID " + cid.hex(), cid)
+            gui._apply_extcsd_import()
+        at(45, lambda: gui.q.put(("call", apply_extcsd)))
+        at(47, log("[+] EXT_CSD read: 512 bytes, CID 15010050...c700"))
+
+        at(55, log("[*] Reading User Area -> userdata_dump.img (29.0 GiB)..."))
+        at(55, lambda: gui.phase_cb("read"))
+        for i in range(57, 237, 4):
+            frac = (i - 57) / 180.0
+            at(i, lambda p=frac * 37.5: gui.progress_cb(p, 24.5 + 2.5 * ((i * 7) % 5)))
+        at(237, log("[*] Stop requested by user..."))
+        at(239, lambda: gui.phase_cb("verify"))
+        at(239, log("[*] Readback verify: first 32 MiB..."))
+        for i in range(241, 297, 4):
+            frac = (i - 241) / 56.0
+            at(i, lambda p=frac * 100.0: gui.progress_cb(p, 61.0 + 1.5 * ((i * 3) % 4)))
+        at(297, log("[+] Verify: readback matches"))
+        at(299, log("[+] sha256 userdata_dump.img: 9f2c41a7e3d05b68a4f0c2de71b846a5"
+                    "e9d3c804fa5b217c6de8091b4a3f7e5d"))
+        at(301, lambda: gui.task_cb(False))
+        at(301, log("[+] Done. Read stopped at 37.5% of User Area, data valid."))
+
+    @staticmethod
+    def _build_extcsd_snapshot():
+        d = bytearray(512)
+        d[177] = 0x07   # BOOT_BUS_WIDTH: 8-bit, DDR
+        d[178] = 0x00   # BOOT_CONFIG_PROT: none
+        d[179] = 0x49   # PARTITION_CONFIG: boot from BOOT1, ACK
+        d[162] = 0x01   # RST_N_FUNCTION: permanent
+        d[160] = 0x01   # PARTITIONING_SUPPORT
+        d[212] = 0x00   # SEC_COUNT: 0x03A00000 = 60817408 sectors = 29.0 GiB
+        d[213] = 0x00
+        d[214] = 0xA0
+        d[215] = 0x03
+        d[226] = 0x20   # BOOT_SIZE_MULT = 32 -> 4 MiB boot partitions
+        d[181] = 0x00   # ERASED_MEM_CONT
+        d[168] = 0x60   # EXT_CSD_REV 6.0
+        cid = bytes.fromhex("15010050343833314030903032d4c700")
+        csd = bytes.fromhex("d07f01320f5903fff6f9cfff8a408000")
+        return bytes(d) + cid + csd
+
+    def tick(self):
+        # called every frame while the demo scenario is running
+        dpg = self._dpg
+        frame = dpg.get_frame_count()
+        if self._start is not None:
+            while self._cursor < len(self._events):
+                rel, fn = self._events[self._cursor]
+                if self._start + rel > frame:
+                    break
+                self._cursor += 1
+                fn()
+        gui = self._gui
+        gui._process_queue()
+        gui._update_status_widgets()
+
+
 def main():
+    demo = "--demo" in sys.argv
     gui = DpgGui()
-    gui.run()
+    gui.run(demo=demo)
 
 
 if __name__ == "__main__":
