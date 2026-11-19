@@ -132,5 +132,5 @@ Telegram (developer chat): https://t.me/+7QS2hWrlAFw1Nzgy
 
 Donations:
 
-На авторской странице бэкэнда можете поблагодарить его автора 
+The support links for original backend author at his own repo:
 [Xgecu-File-Manager](https://github.com/bepe3apng/Xgecu-File-Manager)
