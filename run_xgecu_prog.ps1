@@ -1,10 +1,13 @@
 <#
 .SYNOPSIS
     Xgecu Prog Launcher by Soror L.'.L.'.
-    Version: 2.1.0
+    Version: 2.2.0
     Updated: 2026-11-19
 
 .DESCRIPTION
+    Patchnote v2.2.0 (Soror L.'.L.'.):
+      [-] Removed legacy Kivy GUI support (-Legacy switch removed).
+          DPG-only from this version forward.
     Patchnote v2.1.0 (Soror L.'.L.'.):
       [*] Rewritten from conda env\ to uv venv xgecu_env
           (Scripts\python.exe) in step with install_xgecu_prog.ps1 v2.x.
@@ -21,10 +24,6 @@
           for the Kivy gui.py during the DearPyGui migration.
 #>
 
-param(
-    [switch]$Legacy
-)
-
 $ErrorActionPreference = "Stop"
 $Host.UI.RawUI.WindowTitle = "Xgecu Prog Launcher"
 
@@ -32,7 +31,7 @@ Write-Host @"
 
   ===========================================
     Xgecu Prog Launcher
-    Version: 2.1.0
+    Version: 2.2.0
   ===========================================
 
 "@
@@ -114,13 +113,8 @@ if ($zombiePids.Count -gt 0) {
 # Run
 # ==========================================================
 Set-Location $ROOT
-if ($Legacy) {
-    Write-Host "[INFO] Launcher: Starting legacy Kivy GUI (gui.py)..." -ForegroundColor Yellow
-    & $PYTHON "-X" "utf8" "src\gui.py"
-} else {
-    Write-Host "[INFO] Launcher: Starting Xgecu Prog (DearPyGui)..." -ForegroundColor Cyan
-    & $PYTHON "-X" "utf8" "src\gui_dpg.py"
-}
+Write-Host "[INFO] Launcher: Starting Xgecu Prog (DearPyGui)..." -ForegroundColor Cyan
+& $PYTHON "-X" "utf8" "src\gui_dpg.py"
 $exitCode = $LASTEXITCODE
 
 # ==========================================================

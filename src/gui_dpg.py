@@ -539,7 +539,7 @@ class DpgGui:
         canonical = {st.S("preset_standard"): "standard",
                      "THGA": "THGA",
                      st.S("preset_auto"): "Auto"}.get(value)
-        if canonical is None or canonical == self.emmc_preset_display:
+        if canonical is None:
             return
         protocol_preset = _PRESET_DISPLAY_TO_KEY[canonical]
         previous = self.emmc_preset_display
@@ -553,6 +553,7 @@ class DpgGui:
         P.DEFAULT_PRESET = protocol_preset
         self.dpg.configure_item("combo_clock", items=values, enabled=(canonical != "Auto"),
                                 default_value=clock)
+        self.dpg.set_value("combo_preset", self._preset_display())
         self.on_clock_changed(None, clock, force=True)
         if previous != canonical:
             if canonical == "Auto":
@@ -615,7 +616,7 @@ class DpgGui:
         def result(info):
             def apply():
                 self._extcsd_settings = self._connection_settings()
-                self._show_extcsd(info["extcsd"], "Analyze: CID " + info["cid"].hex(), info["cid"])
+                self._show_extcsd(info["extcsd"], "Analyze: CID " + info["cid"].hex(), info["cid"], clear_reference=True)
                 self._apply_extcsd_import()
             self.q.put(("call", apply))
         self.orchestrator.run_read_info(voltage, bus, result_cb=result)
@@ -915,14 +916,15 @@ class DpgGui:
         162: "NON-REVERSIBLE: 01 enable RST_n forever; 02 disable forever.",
     }
 
-    def _show_extcsd(self, data, source, cid=None, file_tail=b""):
+    def _show_extcsd(self, data, source, cid=None, file_tail=b"", clear_reference=True):
         from modes.emmc.extcsd import validate, describe
         data = validate(data)
         dpg = self.dpg
         self.extcsd_data = data
         self.extcsd_values = {i: f"{data[i]:02X}" for i in _EXT_FIELD_ORDER}
         self.extcsd_drafts = dict(self.extcsd_values)
-        self.extcsd_reference = {}
+        if clear_reference:
+            self.extcsd_reference = {}
         self.extcsd_file_tail = bytes(file_tail)
         dpg.set_value("txt_extcsd_source", _clean_text(source))
         text = describe(data)
@@ -986,8 +988,7 @@ class DpgGui:
             source = f"Chip CID: {cid.hex()} | {self._connection_settings()}"
             def apply():
                 self._extcsd_settings = self._connection_settings()
-                self._show_extcsd(data, source, cid)
-                self._apply_extcsd_import()
+                self._show_extcsd(data, source, cid, clear_reference=False)
             self.q.put(("call", apply))
 
         self.orchestrator.run_read_extcsd(voltage, bus, result, started)
@@ -1046,7 +1047,7 @@ class DpgGui:
 
         def result(actual, actual_cid):
             def apply():
-                self._show_extcsd(actual, source, actual_cid)
+                self._show_extcsd(actual, source, actual_cid, clear_reference=True)
                 self.extcsd_drafts.update({i: v for i, v in pending.items() if i != index})
                 self.extcsd_reference = reference
                 self._refresh_extcsd_rows()
@@ -1078,7 +1079,7 @@ class DpgGui:
             else:
                 if not self.extcsd_chip_ready:
                     self._show_extcsd(data, "File loaded. Read EXT_CSD from the chip to enable writing.",
-                                      file_tail=tail)
+                                      file_tail=tail, clear_reference=True)
                     self.extcsd_values = {}
                 self._extcsd_import = (data, str(path))
                 self._apply_extcsd_import()
@@ -1173,7 +1174,7 @@ class DpgGui:
 
     def _write_extcsd_file_result(self, data, cid):
         def apply():
-            self._show_extcsd(data, "Chip CID: " + cid.hex(), cid)
+            self._show_extcsd(data, "Chip CID: " + cid.hex(), cid, clear_reference=True)
             self._apply_extcsd_import()
         self.q.put(("call", apply))
 
@@ -1611,6 +1612,8 @@ class DpgGui:
     def build(self):
         self._build_static()
         self._build_window()
+        # Initialize preset state (disable clock for Auto preset)
+        self.on_preset_changed(None, self._preset_display())
         dpg = self.dpg
         dpg.create_viewport(title=APP_TITLE, width=1280, height=820, resizable=True)
         icon_path = ASSETS_DIR / "xgecu_prog.ico"
@@ -1679,9 +1682,10 @@ class DpgGui:
                     dpg.add_text(st.S("clock"))
                     dpg.add_combo(self._clock_values(), tag="combo_clock",
                                   default_value=(self._preset_clocks.get(self.emmc_preset_display)
-                                                 if self._preset_clocks.get(self.emmc_preset_display)
-                                                 in self._clock_values() else st.S("clock_30")),
+                                                  if self._preset_clocks.get(self.emmc_preset_display)
+                                                  in self._clock_values() else st.S("clock_30")),
                                   width=130,
+                                  enabled=(self.emmc_preset_display != "Auto"),
                                   callback=lambda s, a: self.on_clock_changed(s, a))
                     dpg.add_spacer(width=10)
                     dpg.add_text(st.S("preset"))

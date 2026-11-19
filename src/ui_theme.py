@@ -1,8 +1,4 @@
 """Reference-inspired blue, silver and charcoal themes with semantic controls."""
-from kivy.event import EventDispatcher
-from kivy.properties import BooleanProperty, DictProperty
-from kivy.utils import get_color_from_hex
-
 
 PALETTES = {
     "light": dict(base="#F3F3F3", mantle="#EBEBEB", crust="#FFFFFF",
@@ -33,16 +29,19 @@ def luminance(color):
     return sum(v * w for v, w in zip(channels, (.2126, .7152, .0722)))
 
 
-class Theme(EventDispatcher):
-    light = BooleanProperty(False)
-    colors = DictProperty({})
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.on_light(self, self.light)
-
-    def on_light(self, instance, light):
+class Theme:
+    def __init__(self, light=False):
+        self.light = light
         self.colors = self.palette(light)
+
+    @property
+    def light(self):
+        return self._light
+
+    @light.setter
+    def light(self, value):
+        self._light = value
+        self.colors = self.palette(value)
 
     @staticmethod
     def button_text(background):
@@ -63,15 +62,17 @@ class Theme(EventDispatcher):
 
     @staticmethod
     def palette(light):
-        palette = {key: tuple(get_color_from_hex(value))
-                   for key, value in PALETTES["light" if light else "dark"].items()}
+        palette = {key: tuple(int(value.lstrip('#')[i:i+2], 16) / 255.0
+                    for i in (0, 2, 4))
+                    for key, value in PALETTES["light" if light else "dark"].items()}
         colors = dict(palette)
         colors.update(background=palette["base"], panel=palette["mantle"],
                       log=palette["crust"], row=palette["base"],
                       alternate=palette["mantle"], header=palette["surface"],
                       input=palette["crust"], button=palette["surface"])
         for accent, value in BUTTONS.items():
-            colors[accent + "_button"] = tuple(get_color_from_hex(value))
+            colors[accent + "_button"] = tuple(int(value.lstrip('#')[i:i+2], 16) / 255.0
+                    for i in (0, 2, 4))
         return colors
 
 

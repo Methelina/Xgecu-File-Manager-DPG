@@ -43,4 +43,4 @@ orchestrator.py, modes/, t48_usb.py are untouched; AppOrchestrator callbacks
 4. STOP and session lifecycle (smoke_stop); autoconfig GUI parity
    (smoke_autoconfig, fix known legacy failures separately).
 5. PyInstaller spec update (dearpygui + fonts), EXE check from dist.
-6. Remove Kivy (requirements, gui.kv, legacy gui.py), docs refresh.
+6. [done] Remove Kivy (requirements, gui.kv, legacy gui.py), docs refresh.

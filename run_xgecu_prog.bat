@@ -1,8 +1,11 @@
 :: Xgecu Prog Runtime Launcher by Soror L.'.L.'.
-:: Version: 3.0.0
+:: Version: 3.1.0
 :: Updated: 2026-11-19
 ::
 :: Full functional equivalent of run_xgecu_prog.ps1 (no PowerShell).
+:: Patchnote v3.1.0 (Soror L.'.L.'.):
+::   [-] Removed legacy Kivy GUI support (-Legacy switch removed).
+::       DPG-only from this version forward.
 :: Patchnote v3.0.0 (Soror L.'.L.'.):
 ::   [+] Standalone cmd implementation: env check with auto-install
 ::       (delegates to the install bat menu), stale-process kill by
@@ -65,16 +68,9 @@ if "%KILLED%"=="1" (
 :: Run
 :: ============================================================
 pushd "%ROOT%"
-if "%~1"=="-Legacy" goto run_legacy
 echo [INFO] Launcher: Starting Xgecu Prog (DearPyGui)...
 "%PYTHON%" -X utf8 "src\gui_dpg.py"
 set "EXITCODE=%ERRORLEVEL%"
-goto app_done
-:run_legacy
-echo [INFO] Launcher: Starting legacy Kivy GUI (gui.py)...
-"%PYTHON%" -X utf8 "src\gui.py"
-set "EXITCODE=%ERRORLEVEL%"
-:app_done
 popd
 echo [RUNNER] App exited with code %EXITCODE%.
 choice /C CN /T 15 /D C /N /M "Console closes in 15 s. [C]=close now, [N]=keep open"

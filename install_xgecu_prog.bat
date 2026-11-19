@@ -1,8 +1,11 @@
 :: Xgecu Prog Installer & Portable Launcher by Soror L.'.L.'.
-:: Version: 3.0.0
+:: Version: 3.1.0
 :: Updated: 2026-11-19
 ::
 :: Full functional equivalent of install_xgecu_prog.ps1 (no PowerShell).
+:: Patchnote v3.1.0 (Soror L.'.L.'.):
+::   [-] Removed legacy Kivy GUI support (menu options removed).
+::       DPG-only from this version forward.
 :: Patchnote v3.0.0 (Soror L.'.L.'.):
 ::   [+] Standalone cmd implementation: menu, portable uv download (curl),
 ::       zip extraction via tar, venv creation, hardlink python.exe,
@@ -47,16 +50,15 @@ cls
 echo  ===========================================
 echo.
 echo   T48 eMMC Flasher - Xgecu Prog
-echo   Portable Installer v3.0.0 (uv)
+echo   Portable Installer v3.1.0 (uv)
 echo   Python 3.11 + DearPyGui 2.3
 echo   ===========================================
 echo.
 call :is_installed
 if "%INSTALLED%"=="1" (
     echo   1^) Start Xgecu Prog ^(DearPyGui^)
-    echo   2^) Start legacy GUI ^(Kivy gui.py^)
-    echo   3^) Reinstall environment
-    echo   4^) Exit
+    echo   2^) Reinstall environment
+    echo   3^) Exit
 ) else (
     echo   1^) Install Xgecu Prog ^(first-time setup^)
     echo   2^) Exit
@@ -70,9 +72,8 @@ if "%CHOICE%"=="2" goto do_exit
 goto menu
 :menu_installed
 if "%CHOICE%"=="1" goto run_dpg
-if "%CHOICE%"=="2" goto run_legacy
-if "%CHOICE%"=="3" goto do_reinstall
-if "%CHOICE%"=="4" goto do_exit
+if "%CHOICE%"=="2" goto do_reinstall
+if "%CHOICE%"=="3" goto do_exit
 goto menu
 :do_exit
 echo [INFO] Exit.
@@ -102,15 +103,6 @@ echo [INFO] Starting Xgecu Prog (DearPyGui)...
 pushd "%ROOT%"
 set "PYTHONUNBUFFERED=1"
 "%PYTHON%" -X utf8 "src\gui_dpg.py"
-set "EXITCODE=%ERRORLEVEL%"
-popd
-goto app_done
-:run_legacy
-call :check_installed_or_exit
-echo [INFO] Starting legacy Kivy GUI (gui.py)...
-pushd "%ROOT%"
-set "PYTHONUNBUFFERED=1"
-"%PYTHON%" -X utf8 "src\gui.py"
 set "EXITCODE=%ERRORLEVEL%"
 popd
 goto app_done
@@ -286,12 +278,6 @@ for %%M in (dearpygui.dearpygui PIL) do (
     ) else (
         call :log SUCCESS "    [+] %%M"
     )
-)
-"%PYTHON%" -c "import kivy" >nul 2>&1
-if errorlevel 1 (
-    call :log WARN "    [?] kivy not installed (legacy gui.py will not run; DPG will)"
-) else (
-    call :log SUCCESS "    [+] kivy"
 )
 if "%ALL_OK%"=="1" (
     call :log SUCCESS "All critical imports OK."

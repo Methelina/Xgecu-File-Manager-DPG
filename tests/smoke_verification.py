@@ -355,21 +355,38 @@ with TemporaryDirectory(dir=".") as folder:
     assert [call.args[3] for call in target.call_args_list] == ["BOOT1", "BOOT2", "USER"]
     assert all(call.kwargs["erase_before"] for call in target.call_args_list)
 
-from kivy.lang import Builder
-from gui import MainScreen
-Builder.load_file(str(Path(__file__).resolve().parents[1] / "src" / "gui.kv"))
-screen = MainScreen()
-assert not screen.verify_read and screen.verify_write
-assert screen.erase_before_write
-screen.ids.chk_erase_before_write.active = False
-assert not screen.erase_before_write
-screen.ids.chk_erase_before_write.active = True
-assert screen.erase_before_write
-screen.ids.chk_verify_read.active = True
-screen.ids.chk_verify_write.active = True
-assert screen.verify_read and screen.verify_write
-screen.operation_running = True
-assert screen.ids.chk_verify_read.disabled and screen.ids.chk_verify_write.disabled
+# DPG GUI flags test
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+from gui_dpg import DpgGui
+
+gui = DpgGui()
+dpg = gui.dpg
+dpg.create_context()
+gui.build()
+
+# Test default flag values
+assert not gui.dpg.get_value("chk_verify_read")
+assert gui.dpg.get_value("chk_verify_write")
+assert gui.dpg.get_value("chk_erase_before_write")
+
+# Test flag toggles
+gui.dpg.set_value("chk_erase_before_write", False)
+assert not gui.dpg.get_value("chk_erase_before_write")
+gui.dpg.set_value("chk_erase_before_write", True)
+assert gui.dpg.get_value("chk_erase_before_write")
+
+gui.dpg.set_value("chk_verify_read", True)
+gui.dpg.set_value("chk_verify_write", True)
+assert gui.dpg.get_value("chk_verify_read") and gui.dpg.get_value("chk_verify_write")
+
+# Test busy state disables flags
+gui.operation_running = True
+gui._refresh_busy_state()
+assert not gui.dpg.get_item_configuration("chk_verify_read")["enabled"]
+assert not gui.dpg.get_item_configuration("chk_verify_write")["enabled"]
+
+dpg.destroy_context()
 print("PASS: streamed comparisons, 50-message cap, EOF/short USB, cancellation, all read/write routes, sparse regions, restart/CID, GUI flags")
 import runpy
 runpy.run_path(str(Path(__file__).resolve().parents[1] / "tests" / "smoke_layers.py"), run_name="__main__")

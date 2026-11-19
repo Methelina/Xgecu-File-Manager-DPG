@@ -1,8 +1,7 @@
 # Xgecu Prog
 
 Xgecu Prog is a Windows application for working with eMMC chips through the
-XGecu T48 programmer. The active frontend is DearPyGui; a legacy Kivy
-frontend is kept until the migration is finished. The T48 link is WinUSB
+XGecu T48 programmer. The frontend is DearPyGui. The T48 link is WinUSB
 (libwdi/Zadig driver), no vendor DLLs are involved.
 
 This repository is a **GUI fork** of
@@ -63,7 +62,6 @@ NAND and SPI are placeholders. HS200/HS400 and 40 MHz modes are removed.
 ```text
 src/                       application code
   gui_dpg.py               DearPyGui frontend (entry point, --demo flag)
-  gui.py, gui.kv           legacy Kivy frontend (migration in progress)
   orchestrator.py          task serialization, STOP, operation streams
   modes/emmc/              session, protocol, operations, extcsd, registers
   strings.py               RU/EN string table
@@ -85,8 +83,7 @@ compile_bin.ps1 -InstallBuildDeps
 ```
 
 Produces `bin\T48_eMMC_dpg_v<version>.exe` (onefile, windowed; version
-from `.version.cfg`). DPG build author: **Soror L.'.L.'.'.** The legacy
-Kivy build (`T48_eMMC.spec` -> `dist\T48_eMMC.exe`) is still supported.
+from `.version.cfg`). DPG build author: **Soror L.'.L.'.'.**
 See [docs/BUILD.md](docs/BUILD.md).
 
 ## Tests

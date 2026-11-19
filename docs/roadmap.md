@@ -8,7 +8,7 @@ Status as of 2026-11-19. Checked = done and verified; unchecked = todo.
 - [x] Portable uv runtime: `install_xgecu_prog.ps1` / `run_xgecu_prog.ps1`
       (+ standalone `.bat` v3.0.0), `xgecu_env` (Python 3.11), caches
       isolated in `.cache`, stale-process kill, auto-install on launch
-- [x] `dearpygui==2.3` in requirements.txt (kivy kept for legacy gui.py)
+- [x] `dearpygui==2.3` in requirements.txt
 - [x] OctoGirl font set vendored in `assets/fonts` (ModeSeven x2, VCR OSD
       Mono RUS, JetBrains Mono NF) + DejaVu Sans Mono for progress bars
 - [x] Migration notes: docs/MIGRATION_DPG.md; roadmap: docs/roadmap.md
@@ -88,7 +88,7 @@ Status as of 2026-11-19. Checked = done and verified; unchecked = todo.
       refresh docs/BUILD.md / docs/ARCHITECTURE.md for the src/ layout
 - [ ] Hardware verification (stage 6 of the plan): INIT EMMC on real
       T48, small-area read/write, STOP timings, logging per AGENTS 11
-- [ ] Remove Kivy: requirements.txt, src/gui.py, src/gui.kv,
-      kivy imports in ui_log/ui_theme, packaging_runtime reconsider,
-      legacy T48_eMMC.spec retirement
+- [x] Remove Kivy: requirements.txt, src/gui.py, src/gui.kv,
+      kivy imports in ui_log/ui_theme, packaging_runtime removed,
+      legacy T48_eMMC.spec retired
 - [ ] Final: version bump, release build, README/BUILD touch-up

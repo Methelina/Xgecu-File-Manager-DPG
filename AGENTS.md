@@ -4,7 +4,7 @@
 
 Этот файл содержит инструкции для агентов и разработчиков, работающих с текущей версией Xgecu Prog в каталоге `emmc_continue` и его подкаталогах. Он не заменяет задачу пользователя и не распространяет автоматически разрешение на операции с оборудованием.
 
-Рабочий язык общения и пользовательской документации — русский. Сохраняйте существующие имена API и технических полей на английском. Основная точка входа — `gui.py`, основной файл сборки — `T48_eMMC.spec`.
+Рабочий язык общения и пользовательской документации — русский. Сохраняйте существующие имена API и технических полей на английском. Основная точка входа — `gui_dpg.py`, основной файл сборки — `T48_eMMC_dpg.spec`.
 
 Документ составлен по состоянию на 30 октября 2026 года. Состояние тестов и оборудования меняется: перед выводами проверяйте актуальный код и результаты. Не превращайте исторические наблюдения в постоянные гарантии.
 
@@ -17,20 +17,18 @@ K:\work\ChipTune\Xgecu-File-Manager-DPG\
   xgecu_env\Scripts\python.exe      (uv, создаётся install_xgecu_prog.ps1)
   src\
     gui_dpg.py                      (точка входа DearPyGui-фронтенда)
-    gui.py, gui.kv                  (легаси Kivy-фронтенд, до завершения миграции)
     orchestrator.py
     t48_usb.py
     image_processor.py
     scatter_to_gpt.py
     strings.py                      (RU/EN локализация UI)
     ui_log.py, ui_theme.py
-    packaging_runtime.py
     modes\emmc_mode.py
     modes\emmc\
     assets\, docs\, tests\, cfg\
   install_xgecu_prog.ps1, run_xgecu_prog.ps1, compile_bin.ps1 (+ .bat)
   .version.cfg, .lang.cfg
-  T48_eMMC_dpg.spec, T48_eMMC.spec
+  T48_eMMC_dpg.spec
   requirements.txt, requirements-build.txt
   tests\smoke_*.py
   docs\research\ (probe-скрипты, исследования)
@@ -83,7 +81,7 @@ K:\work\ChipTune\Xgecu-File-Manager-DPG\
 
 | Модуль | Что менять здесь |
 |---|---|
-| `src\gui.py`, `src\gui.kv` | Интерфейс, свойства, действия, диалоги, привязки |
+| `src\gui_dpg.py` | Интерфейс, свойства, действия, диалоги, привязки |
 | `src\ui_theme.py` | Палитры, семантика цвета, контраст |
 | `src\ui_log.py` | Уровни, фильтр, безопасная подсветка журнала |
 | `src\orchestrator.py` | Сериализация задач, STOP, последовательность полных операций |
@@ -224,7 +222,7 @@ K:\work\ChipTune\Xgecu-File-Manager-DPG\
 
 ## 12. GUI и визуальные требования
 
-- GUI-состояние меняется через поток Kivy/Clock, без прямых обновлений виджетов из USB-потока.
+- GUI-состояние меняется через поток DPG/frame callback, без прямых обновлений виджетов из USB-потока.
 - Журнал, числовой прогресс и фаза передаются отдельными callback.
 - При смене темы сохраняйте контраст активных/неактивных состояний.
 - «Инит eMMC»: светлая тема `#AFFC41`, тёмная `#548C2F`, текст тёмной темы белый.
@@ -290,7 +288,6 @@ K:\work\ChipTune\Xgecu-File-Manager-DPG\
 ```powershell
 xgecu_env\Scripts\python.exe -X utf8 src\gui_dpg.py           # основной GUI (DPG)
 xgecu_env\Scripts\python.exe -X utf8 src\gui_dpg.py --demo    # демо без оборудования
-xgecu_env\Scripts\python.exe -X utf8 src\gui.py               # легаси Kivy GUI
 xgecu_env\Scripts\python.exe -X utf8 tests\smoke_layers.py
 xgecu_env\Scripts\python.exe -X utf8 tests\smoke_stop.py
 xgecu_env\Scripts\python.exe -X utf8 tests\smoke_verification.py
@@ -334,9 +331,7 @@ xgecu_env\Scripts\python.exe -X utf8 tests\smoke_extcsd.py
 powershell -NoProfile -ExecutionPolicy Bypass -File compile_bin.ps1 -InstallBuildDeps
 ```
 
-Основной результат — bin/T48_eMMC_dpg_v<ver>.exe (spec T48_eMMC_dpg.spec, onefile/windowed, версия из .version.cfg). Spec включает src\, assets, .version.cfg, dearpygui; kivy/numpy исключены. Легаси spec T48_eMMC.spec собирает dist/T48_eMMC.exe (Kivy-фронтенд) и поддерживается до конца миграции.
-
-Сохраняйте `packaging_runtime.py`: он устраняет `site.USER_BASE is None` при frozen-запуске Kivy dependencies. Ресурсы разрешаются относительно `__file__`; не заменяйте это зависимостью от текущего каталога.
+Основной результат — bin/T48_eMMC_dpg_v<ver>.exe (spec T48_eMMC_dpg.spec, onefile/windowed, версия из .version.cfg). Spec включает src\, assets, .version.cfg, dearpygui; kivy/numpy исключены.
 
 Не используйте старый debug-spec как источник актуальных параметров. Не удаляйте диагностические EXE/build-артефакты без необходимости. Если запущенный файл блокирует пересборку, не завершайте произвольные процессы пользователя; сначала установите принадлежность конкретного процесса и отсутствие активной аппаратной операции.
 

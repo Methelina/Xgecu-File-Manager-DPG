@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart TD
-    UI[gui.py + gui.kv] --> O[AppOrchestrator]
+    UI[gui_dpg.py] --> O[AppOrchestrator]
     O --> F[EmmcDriver]
     F --> OP[operations.py]
     OP --> S[EmmcSession]
@@ -22,8 +22,7 @@ flowchart TD
 
 | Файл | Ответственность |
 |---|---|
-| `gui.py` | Свойства интерфейса, диалоги файлов, действия, вывод журнала |
-| `gui.kv` | Дерево экранов, таблицы, кнопки, привязки, стили |
+| `gui_dpg.py` | Свойства интерфейса, диалоги файлов, действия, вывод журнала |
 | `ui_theme.py` | Палитры и контраст текста |
 | `ui_log.py` | Безопасный markup, уровни, фильтрация и шрифт журнала |
 | `orchestrator.py` | Блокировка параллельных задач, поток, STOP, полные операции |
@@ -46,7 +45,7 @@ flowchart TD
 
 `AppOrchestrator.run_task` захватывает `_operation_lock` без ожидания. Если задача уже идёт, новая отклоняется сообщением. Запрос STOP очищается перед новой задачей. Задача запускается в daemon-потоке, ошибки логируются, в `finally` снимается блокировка и сообщается завершение.
 
-`usb_operation(stop_event)` связывает новые экземпляры USB-устройства с событием текущего потока через thread-local. `_OperationFeedback` передаёт текст и необязательные числовые callback `progress`/`phase`. GUI переносит изменения свойств в поток Kivy через `Clock.schedule_once`.
+`usb_operation(stop_event)` связывает новые экземпляры USB-устройства с событием текущего потока через thread-local. `_OperationFeedback` передаёт текст и необязательные числовые callback `progress`/`phase`. GUI переносит изменения свойств в поток DPG через frame callback (`dpg.set_frame_callback`).
 
 Daemon-поток не является гарантией безопасного завершения при принудительном закрытии процесса. Ожидаемый способ прерывания — STOP и ожидание завершения задачи.
 

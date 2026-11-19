@@ -2,8 +2,6 @@
 import re
 from pathlib import Path
 
-from kivy.utils import escape_markup, get_hex_from_color
-
 TIME = re.compile(r"^\[\d{2}:\d{2}:\d{2}:\d{3}\]")
 TOKENS = re.compile(
     r"(?P<time>^\[\d{2}:\d{2}:\d{2}:\d{3}\])"
@@ -34,8 +32,7 @@ def log_level(line):
 
 def format_log(value, colors, level="Все", query=""):
     def paint(value, role, bold=False):
-        color = get_hex_from_color(colors[role])[1:7]
-        value = escape_markup(value)
+        color = colors[role]
         if bold:
             value = "[b]" + value + "[/b]"
         return "[color=" + color + "]" + value + "[/color]"
@@ -50,14 +47,14 @@ def format_log(value, colors, level="Все", query=""):
         status_role = {"INFO": "blue", "OK": "green", "WARN": "orange", "ERROR": "red"}[severity]
         parts, end = [], 0
         for match in TOKENS.finditer(line):
-            parts.append(escape_markup(line[end:match.start()]))
+            parts.append(line[end:match.start()])
             kind = match.lastgroup
             role = {"time": "subtle", "level": status_role, "address": "primary",
                     "operation": "text", "location": "muted",
                     "failure": status_role}[kind]
             parts.append(paint(match.group(), role, kind in ("level", "operation", "failure")))
             end = match.end()
-        parts.append(escape_markup(line[end:]))
+        parts.append(line[end:])
         result.append("".join(parts))
     return "\n".join(result)
 

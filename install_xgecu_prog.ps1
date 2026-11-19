@@ -1,16 +1,19 @@
 <#
 .SYNOPSIS
     Xgecu Prog Installer & Portable Launcher by Soror L.'.L.'.
-    Version: 2.1.0
+    Version: 2.2.0
     Updated: 2026-11-19
 
 .DESCRIPTION
+    Patchnote v2.2.0 (Soror L.'.L.'.):
+      [-] Removed legacy Kivy GUI support (gui.py, gui.kv, kivy deps).
+          DPG-only from this version forward.
     Patchnote v2.1.0 (Soror L.'.L.'.):
       [*] Rewritten from conda to portable uv: uv.exe downloaded into the
           project root, caches isolated in .cache.
-      [+] Menu: install / run (DPG or legacy Kivy) / reinstall / exit.
+      [+] Menu: install / run (DPG) / reinstall / exit.
       [+] Font set check in assets\fonts with fallback warning.
-      [+] Critical import check (dearpygui, PIL, kivy) into logs\install.log.
+      [+] Critical import check (dearpygui, PIL) into logs\install.log.
       [+] Stale-process kill by xgecu_env python path and 'Xgecu' window
           title at install start; broken env quarantine by rename.
     Patchnote v2.0.0 (Soror L.'.L.'.):
@@ -260,8 +263,7 @@ function Install-XgecuProg {
     Write-Status "Checking critical imports..." "INFO"
     $Modules = @(
         "dearpygui.dearpygui",
-        "PIL",
-        "kivy"
+        "PIL"
     )
     $AllOK = $true
     foreach ($mod in $Modules) {
@@ -269,12 +271,8 @@ function Install-XgecuProg {
         if ($LASTEXITCODE -eq 0) {
             Write-Status "    [+] $mod" "SUCCESS"
         } else {
-            if ($mod -eq "kivy") {
-                Write-Status "    [?] kivy not installed (legacy gui.py will not run; DPG will)" "WARN"
-            } else {
-                Write-Status "    [!] $mod NOT FOUND" "ERROR"
-                $AllOK = $false
-            }
+            Write-Status "    [!] $mod NOT FOUND" "ERROR"
+            $AllOK = $false
         }
     }
     if ($AllOK) { Write-Status "All critical imports OK." "SUCCESS" }
@@ -288,21 +286,15 @@ function Install-XgecuProg {
 # Run
 # ==========================================================
 function Start-XgecuProg {
-    param([switch]$Legacy)
-
     if (-not (Test-IsInstalled)) {
         Write-Status "Environment is not installed. Run installation first." "ERROR"
         return $false
     }
     $PythonExePath = Join-Path $ScriptPath $EnvName "Scripts\python.exe"
-    Write-Status "Starting Xgecu Prog ($(if ($Legacy) { 'legacy Kivy' } else { 'DearPyGui' }))..." "INFO"
+    Write-Status "Starting Xgecu Prog (DearPyGui)..." "INFO"
     Set-Location $ScriptPath
     $env:PYTHONUNBUFFERED = "1"
-    if ($Legacy) {
-        & $PythonExePath "-X" "utf8" "src\gui.py"
-    } else {
-        & $PythonExePath "-X" "utf8" "src\gui_dpg.py"
-    }
+    & $PythonExePath "-X" "utf8" "src\gui_dpg.py"
     return $true
 }
 
@@ -314,16 +306,15 @@ function Show-Menu {
     Write-Host " ===========================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  T48 eMMC Flasher - Xgecu Prog" -ForegroundColor Yellow
-    Write-Host "  Portable Launcher v2.1.0 (uv)" -ForegroundColor Green
+    Write-Host "  Portable Launcher v2.2.0 (uv)" -ForegroundColor Green
     Write-Host "  Python 3.11 + DearPyGui 2.3" -ForegroundColor Cyan
     Write-Host "  ===========================================" -ForegroundColor Cyan
     Write-Host ""
     $installed = Test-IsInstalled
     if ($installed) {
         Write-Host "  1) Start Xgecu Prog (DearPyGui)" -ForegroundColor Yellow
-        Write-Host "  2) Start legacy GUI (Kivy gui.py)" -ForegroundColor Yellow
-        Write-Host "  3) Reinstall environment (remove and set up again)" -ForegroundColor Yellow
-        Write-Host "  4) Exit" -ForegroundColor Gray
+        Write-Host "  2) Reinstall environment (remove and set up again)" -ForegroundColor Yellow
+        Write-Host "  3) Exit" -ForegroundColor Gray
     } else {
         Write-Host "  1) Install Xgecu Prog (first-time setup)" -ForegroundColor Yellow
         Write-Host "  2) Exit" -ForegroundColor Gray
@@ -358,20 +349,17 @@ do {
         }
         "3" {
             if ($installed) {
-                Start-XgecuProg -Legacy
+                Write-Status "Exit." "INFO"
+                exit 0
             } else {
                 Write-Status "Invalid choice." "WARN"
             }
-        }
-        "4" {
-            Write-Status "Exit." "INFO"
-            exit 0
         }
         default {
             Write-Status "Invalid choice." "WARN"
         }
     }
-    if ($choice -ne "4") {
+    if ($choice -ne "3") {
         Write-Host "`nPress any key to return to the menu..." -ForegroundColor Gray
         $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     }
