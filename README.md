@@ -15,6 +15,18 @@ build pipeline in this fork are by **Soror L.'.L.'.'**.
 Supported platforms: Windows 10/11 x64. Fully portable runtime - the
 project brings its own Python 3.11 (via uv), no system Python is required.
 
+*[Русская версия](README.ru.md)*
+
+## Interface
+
+EN:
+
+![GUI in English](assets/GUI_EN.png)
+
+RU:
+
+![GUI in Russian](assets/GUI_RU.png)
+
 ## Quick start
 
 ```bat
