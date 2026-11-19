@@ -132,6 +132,5 @@ Telegram (developer chat): https://t.me/+7QS2hWrlAFw1Nzgy
 
 Donations:
 
-- T-Bank: https://www.tbank.ru/cf/5xFGZshymTA
-- Sber: https://messenger.online.sberbank.ru/sl/b64OEIJdaiBKMQ5W3
-- Tips: https://tips.tips/000491446
+На авторской странице бэкэнда можете поблагодарить его автора 
+[Xgecu-File-Manager](https://github.com/bepe3apng/Xgecu-File-Manager)
