@@ -20,12 +20,6 @@ Python не требуется.
 
 ## Интерфейс
 
-EN:
-
-![GUI на английском](assets/GUI_EN.png)
-
-RU:
-
 ![GUI на русском](assets/GUI_RU.png)
 
 ## Быстрый старт

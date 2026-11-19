@@ -19,13 +19,7 @@ project brings its own Python 3.11 (via uv), no system Python is required.
 
 ## Interface
 
-EN:
-
 ![GUI in English](assets/GUI_EN.png)
-
-RU:
-
-![GUI in Russian](assets/GUI_RU.png)
 
 ## Quick start
 
