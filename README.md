@@ -5,6 +5,13 @@ XGecu T48 programmer. The active frontend is DearPyGui; a legacy Kivy
 frontend is kept until the migration is finished. The T48 link is WinUSB
 (libwdi/Zadig driver), no vendor DLLs are involved.
 
+This repository is a **GUI fork** of
+[Xgecu-File-Manager](https://github.com/bepe3apng/Xgecu-File-Manager) by
+[bepe3apng](https://github.com/bepe3apng): the backend (eMMC session,
+protocol, operations, upstream feature modules) comes from the upstream
+project, while the DearPyGui interface, the portable uv runtime and the
+build pipeline in this fork are by **Soror L.'.L.'.'**.
+
 Supported platforms: Windows 10/11 x64. Fully portable runtime - the
 project brings its own Python 3.11 (via uv), no system Python is required.
 
@@ -72,8 +79,9 @@ compile_bin.ps1 -InstallBuildDeps
 ```
 
 Produces `bin\T48_eMMC_dpg_v<version>.exe` (onefile, windowed; version
-from `.version.cfg`). The legacy Kivy build (`T48_eMMC.spec` ->
-`dist\T48_eMMC.exe`) is still supported. See [docs/BUILD.md](docs/BUILD.md).
+from `.version.cfg`). DPG build author: **Soror L.'.L.'.'.** The legacy
+Kivy build (`T48_eMMC.spec` -> `dist\T48_eMMC.exe`) is still supported.
+See [docs/BUILD.md](docs/BUILD.md).
 
 ## Tests
 

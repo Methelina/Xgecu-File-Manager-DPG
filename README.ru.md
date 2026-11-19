@@ -5,6 +5,13 @@ Xgecu Prog — приложение для Windows для работы с eMMC-�
 Kivy сохраняется до завершения миграции. Связь с T48 — WinUSB
 (драйвер libwdi/Zadig), без DLL производителя.
 
+Этот репозиторий — **GUI-форк** проекта
+[Xgecu-File-Manager](https://github.com/bepe3apng/Xgecu-File-Manager)
+автора [bepe3apng](https://github.com/bepe3apng): бэкенд (сессия eMMC,
+протокол, операции, модули фич из апстрима) взят из апстрим-проекта,
+а DearPyGui-интерфейс, портативный рантайм на uv и сборочная линия этого
+форка выполнены **Soror L.'.L.'.'**.
+
 Поддерживаемые платформы: Windows 10/11 x64. Полностью портативный
 рантайм — проект несёт собственный Python 3.11 (через uv), системный
 Python не требуется.
@@ -74,9 +81,9 @@ compile_bin.ps1 -InstallBuildDeps
 ```
 
 Результат — `bin\T48_eMMC_dpg_v<версия>.exe` (onefile, windowed; версия
-из `.version.cfg`). Легаси-сборка на Kivy (`T48_eMMC.spec` ->
-`dist\T48_eMMC.exe`) поддерживается. Подробности —
-[docs/BUILD.md](docs/BUILD.md).
+из `.version.cfg`). Автор сборки DPG: **Soror L.'.L.'.'.** Легаси-сборка
+на Kivy (`T48_eMMC.spec` -> `dist\T48_eMMC.exe`) поддерживается.
+Подробности — [docs/BUILD.md](docs/BUILD.md).
 
 ## Тесты
 
