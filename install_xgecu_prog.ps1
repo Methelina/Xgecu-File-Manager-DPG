@@ -244,6 +244,18 @@ function Install-XgecuProg {
         Write-Status "requirements.txt not found in project root" "WARN"
     }
 
+    # ---- 4b. Build dependencies ----
+    $BuildReq = Join-Path $ScriptPath "requirements-build.txt"
+    if (Test-Path $BuildReq) {
+        Write-Status "Installing build dependencies (requirements-build.txt)..." "INFO"
+        $buildOk = Invoke-WithRetry -Script {
+            Invoke-UvPipInstall "-r `"$BuildReq`""
+            if ($LASTEXITCODE -ne 0) { throw "uv pip install failed" }
+        }
+        if ($buildOk) { Write-Status "Build dependencies installed." "SUCCESS" }
+        else { Write-Status "Build dependency install reported warnings (see logs\install.log)" "WARN" }
+    }
+
     # ---- 5. Critical imports ----
     Write-Status "Checking critical imports..." "INFO"
     $Modules = @(

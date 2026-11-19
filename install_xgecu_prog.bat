@@ -265,6 +265,16 @@ if errorlevel 1 (
 ) else (
     call :log SUCCESS "Dependencies installed."
 )
+:: ---- step 4b: build dependencies ----
+set "BUILDREQ=%ROOT%requirements-build.txt"
+if not exist "%BUILDREQ%" goto step_imports
+call :log INFO "Installing build dependencies (requirements-build.txt)..."
+"%UVEXE%" pip install --python "%PYTHON%" -r "%BUILDREQ%"
+if errorlevel 1 (
+    call :log WARN "Build dependency install reported warnings (see logs\install.log)"
+) else (
+    call :log SUCCESS "Build dependencies installed."
+)
 :: ---- step 5: critical imports ----
 call :log INFO "Checking critical imports..."
 set "ALL_OK=1"

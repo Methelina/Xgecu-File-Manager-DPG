@@ -56,9 +56,12 @@ if ($InstallBuildDeps) {
 
 & $PYTHON -c "import PyInstaller" 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] PyInstaller is not installed in xgecu_env." -ForegroundColor Red
-    Write-Host "        Run again with -InstallBuildDeps." -ForegroundColor Red
-    exit 1
+    Write-Host "[INFO] PyInstaller not found in xgecu_env - installing..." -ForegroundColor Cyan
+    & $UvExe pip install --python $PYTHON "pyinstaller==6.22.3"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to install PyInstaller." -ForegroundColor Red
+        exit 1
+    }
 }
 
 $version = (Get-Content (Join-Path $ROOT ".version.cfg") -Raw).Trim()
