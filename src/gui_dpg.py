@@ -169,6 +169,8 @@ class DpgGui:
         import dearpygui.dearpygui as dpg
         self.dpg = dpg
         self._gui_ready = False
+        from gui_data_browser import DataBrowserTab
+        self._data_browser = DataBrowserTab(self)
         self.q = queue.Queue()
         self._dlg_seq = 0
 
@@ -1591,6 +1593,7 @@ class DpgGui:
                         dpg.add_text(st.S("mode_nand_soon"), color=COL["idle"])
                     with dpg.tab(label=st.S("tab_spi"), tag="tab_spi"):
                         dpg.add_text(st.S("mode_spi_soon"), color=COL["idle"])
+                    self._data_browser.build()
 
             # bottom bar: state + STOP
             with dpg.child_window(height=50, border=False, no_scrollbar=True):

@@ -1,3 +1,9 @@
 # Runtime dependencies (Windows, Python 3.11)
 dearpygui==2.3
 Pillow==13.0.0
+
+# data_browser native unpackers
+py7zr>=0.20
+python-lzo>=1.15
+PySquashfsImage>=0.9
+dissect.squashfs>=1.12

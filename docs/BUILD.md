@@ -18,6 +18,10 @@
 | PyInstaller | 6.22.3 | Сборка |
 | pywin32 | 312 | Проверки окон средствами Windows |
 | pyusb | 1.3.1 | Есть в окружении/корневых зависимостях |
+| py7zr | установлена через uv | Data Browser: нативная распаковка 7z |
+| python-lzo | 1.15 | Data Browser: LZO-блоки (для lzop-контейнеров остаётся lzop.exe) |
+| dissect.squashfs | 1.12 | Data Browser: нативное извлечение squashfs |
+| PySquashfsImage | 0.9 | Data Browser: запасной squashfs-ридер |
 
 Это снимок рабочего окружения, а не проверенная матрица всех совместимых версий. Tkinter используется для файловых диалогов; он входит в обычную установку Python с Tcl/Tk. Основной транспорт этой версии использует ctypes/WinUSB, а не pyusb.
 

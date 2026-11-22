@@ -7,6 +7,12 @@ _LANG = "en"
 STRINGS = {
     # tabs
     "tab_emmc": {"en": "EMMC", "ru": "EMMC"},
+    "tab_data_browser": {"en": "Data Browser", "ru": "Data Browser"},
+    "db_browse_dump": {"en": "Open dump file...", "ru": "Открыть дамп..."},
+    "db_scan": {"en": "Scan partitions", "ru": "Сканировать разделы"},
+    "db_save_file": {"en": "Save selected", "ru": "Сохранить выбранное"},
+    "db_none": {"en": "No partitions scanned yet.", "ru": "Разделы ещё не просканированы."},
+    "db_need_init": {"en": "Browse live chip after Init eMMC, or open a dump file.", "ru": "Живой чип после Init eMMC или откройте файл дампа."},
     "tab_nand": {"en": "NAND [SOON]", "ru": "NAND [СКОРО]"},
     "tab_spi": {"en": "SPI [SOON]", "ru": "SPI [СКОРО]"},
     "mode_nand_soon": {"en": "NAND Flash mode is under development",

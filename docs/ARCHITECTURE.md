@@ -164,3 +164,18 @@ erase_blocks(is_18v, bus_width, part_type, start_lba, end_lba,
 `read_info_and_partitions` возвращает `(info, parts)`, EXT_CSD — `(data, cid)` или None, успешная полная запись области и основные дампы возвращают True. Возвраты разных маршрутов неоднородны: фасад диапазонов/стирания не пробрасывает результат, а ряд операций ловит ошибки и пишет их в журнал. Нельзя строить единый внешний API только на предположении, что отсутствие исключения означает успех.
 
 Для доступа к оборудованию из нового рабочего потока нужен тот же контекст отмены и сериализация. Не запускайте примеры прямого API параллельно GUI. При изменении реализации обновляйте и документацию поведения, и соответствующие существующие smoke-тесты.
+
+## 10. Data Browser (вкладка файлового браузера)
+
+Слои `src\modes\emmc\data_browser\` и `src\gui_data_browser.py`:
+
+- `sources.py` — `DataSource` (протокол чтения диапазонов), `FileSource` (файл-дамп, только rb), `SessionSource` (живой чип через `session.read_sectors`, STOP через `stop_event` → `InterruptedError`), `RangeCache` (LRU выровненных 16 КиБ порций поверх любого источника).
+- `partmaps.py` — карты разделов по приоритету: GPT (CRC заголовка с нулями @0x10..0x13 и массива, бэкап) → MStar PT (записи @0x400 шаг 0x200: база/размер-секторы/атрибуты/имя; старты — накопительные суммы байт; хвост клампится к размеру дампа) → cmdline (`mt53xx-emmc:` / `blkdevparts=mmcblk0:`, суффиксы k/K/m/M, маркер enc) → MBR.
+- `signatures.py` + `cfg\data_browser\*.json` — идентификация содержимого по магиям из подключаемого профиля (расширение без правки кода); эталонные карты устройств в `partition_presets.json`, whitelist расширений в `file_types.json`.
+- `fs_fat.py` (FAT12/16/32 по спецификации, LFN), `fs_ext.py` (ext2/3/4: суперблок @1024, group descriptors, extent-деревья глубины ≤1 и косвенные блоки; symlinks помечаются), `fs_vdfs.py` (экспериментально, ждёт валидации на реальном VDFS-дампе).
+- `tools_runner.py` + `assets\tools\` — внешние утилиты (7z, unsquashfs, lzop, lzhs_scanner, aescrypt2) с парсингом маркеров вывода; нативные пути: gzip→zlib (multi-member), 7z→py7zr, squashfs→dissect.squashfs (внутреннее смещение ищется сканом `hsqs`).
+- `vfs.py` — единое дерево `VfsNode` (раздел→ФС→файлы), `extract()`/`read_node()`, `unpack_partition()` (успех = непустой каталог назначения).
+- `gui_data_browser.py` — вкладка Data Browser в `mode_pages`: файл-дамп или живой чип после Init eMMC (через `orchestrator.run_task`, adopt результатов на GUI-потоке через очередь `("call", fn)`), сохранение файлов, shallow-режим `build(list_fs=False)` для больших дампов.
+
+Инварианты: дамп и чип открываются только на чтение; извлечение — в отдельный каталог; будущая запись/замена — только на копию дампа с предварительным бэкапом. STOP проверяется перед каждой порцией `SessionSource`. Smoke-тесты: `tests\smoke_data_browser.py` (unit + e2e на двух реальных дампах), `tests\smoke_session_source.py` (mock-сессия: фрагмент/кросс-чанк/кеш/STOP).
+

@@ -1,0 +1,22 @@
+{
+  "signatures": [
+    {"magic": "hsqs", "offset": 0, "label": "squashfs"},
+    {"magic": "sqsh", "offset": 0, "label": "squashfs"},
+    {"magic": "0x27051956", "offset": 0, "label": "uImage"},
+    {"magic": "ANDROID!", "offset": 0, "label": "android-boot"},
+    {"magic": "MZ", "offset": 0, "label": "mz"},
+    {"magic": "1F 8B", "offset": 0, "label": "gzip"},
+    {"magic": "UBI#", "offset": 0, "label": "ubi"},
+    {"magic": "UBI!", "offset": 0, "label": "ubi"},
+    {"magic": "NFSB", "offset": 0, "label": "nfsb"},
+    {"magic": "LZHS", "offset": 0, "label": "lzhs"},
+    {"magic": "X935", "offset": 0, "label": "X935"},
+    {"magic": "P935", "offset": 0, "label": "P935"},
+    {"magic": "VDFS2006", "offset": 0, "label": "vdfs"},
+    {"magic": "VDFS2007", "offset": 0, "label": "vdfs"},
+    {"magic": "VDFS1002", "offset": 0, "label": "vdfs"},
+    {"magic": "VDFS0001", "offset": 0, "label": "vdfs"},
+    {"magic": "1eMMCFS", "offset": 0, "label": "vdfs"},
+    {"magic": "53 EF", "offset": 1080, "label": "ext2/3/4"}
+  ]
+}
