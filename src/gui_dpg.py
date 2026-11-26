@@ -1,12 +1,18 @@
 """Xgecu Prog DearPyGui frontend by Soror L.'.L.'.
-Version: 2.1.0
-Updated: 2026-11-19
+Version: 2.1.1
+Updated: 2026-11-26
 
 Entry point: python src/gui_dpg.py [--demo | -Legacy]
 Backend (orchestrator, modes/, t48_usb) is shared with the legacy Kivy
 gui.py. UI strings are localized via strings.py (RU/EN); journal lines
 arrive from the backend as-is.
 
+Patchnote v2.1.1 (Soror L.'.L.'.):
+  [*] _process_queue drains at most 6 events per frame: chunked tree
+      builds enqueue hundreds of callbacks and the old drain-all-in-one-
+      frame executed them back-to-back with no repaint - the window
+      froze for minutes with a stalled bar (Data Browser "stuck at
+      94.1%", half-built tree).
 Patchnote v2.1.0 (Soror L.'.L.'.):
   [+] RU/EN localization: strings.py, RU/EN buttons in the title row,
       full window rebuild on switch; RU renders in VCR OSD Mono RUS.
@@ -235,6 +241,14 @@ class DpgGui:
         self.q.put(("phase", action))
 
     def _process_queue(self):
+        """Drain queue events with a per-frame time budget (~8 ms).
+
+        A frame budget, not an item budget: one queued chunk can add 150
+        tree nodes (~10 ms), and the chunked Data Browser build enqueues
+        hundreds of chunks - draining them all back-to-back in one frame
+        froze the window for minutes with a stalled bar.
+        """
+        deadline = time.perf_counter() + 0.008
         try:
             while True:
                 item = self.q.get_nowait()
@@ -251,6 +265,8 @@ class DpgGui:
                     self._on_phase(item[1])
                 elif kind == "call":
                     item[1]()
+                if time.perf_counter() >= deadline:
+                    break
         except queue.Empty:
             pass
 

@@ -117,6 +117,8 @@ def _fs_children(src, part: Partition, fs_label: str, volume_out: list) -> list[
                     node = VfsNode(name=e.name, is_dir=e.is_dir, size=e.size,
                                    offset=e.offset, fs_label=fs_label,
                                    backend=vol, read_key=e)
+                    if getattr(e, "symlink_target", ""):
+                        node.fs_label = f"symlink -> {e.symlink_target}"
                     if e.is_dir:
                         try:
                             node.children = walk_ext(e.inode, depth + 1)

@@ -45,6 +45,7 @@ STRINGS = {
     "db_mount_stage": {"en": "Mount: {s}", "ru": "Монтирование: {s}"},
     "db_mount_failed": {"en": "Mount failed: {e}",
                         "ru": "Ошибка монтирования: {e}"},
+    "db_left": {"en": "left", "ru": "осталось"},
     "db_lamp_hint": {"en": "Drive state: gray = none, yellow = mounting, "
                           "green = mounted, red = failed.",
                      "ru": "Состояние диска: серый = нет, жёлтый = "

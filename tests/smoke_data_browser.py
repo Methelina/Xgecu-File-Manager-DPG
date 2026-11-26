@@ -328,8 +328,10 @@ def e2e_tests(dump_path: str | None = None, shallow: bool = False) -> bool:
         # content by re-reading through a fresh backend instance (hash match).
         if node.fs_label in ("ext2/3/4", "fat32", "fat16", "fat12") and files:
             picked = [f for f in files if 64 <= f.size <= 1_000_000][:3]
+            import re
             for f in picked:
-                dest = out_dir / f"{node.name}_{f.name}".replace("/", "_")[:80]
+                safe = re.sub(r'[<>:"/\\|?*]', "_", f"{node.name}_{f.name}")[:80]
+                dest = out_dir / safe
                 n = browser.extract(f, str(dest))
                 data = dest.read_bytes()
                 ok &= check(f"e2e: extract {node.name}/{f.name}",

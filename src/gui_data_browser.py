@@ -7,9 +7,32 @@ Two input modes: a dump file (always available, read-only) or the live chip
 SessionSource after Init eMMC. The dump is never written to.
 
 src/gui_data_browser.py
-Version:     0.3.1
+Version:     0.3.4
 Author:      Soror L.'.L.'
 Updated:     2026-11-26
+
+Patch Notes v0.3.4 (Soror L.'.L.'.):
+  [+] Console "listed" lines carry the live scan state: overall percent,
+      wall-clock time and the partition counter, plus listing duration
+      - "[data_browser] smarttv: listed (76344 files, fat32, 92.2%,
+      22:31:11 16/17, 2.4s)".
+
+Patch Notes v0.3.3 (Soror L.'.L.'.):
+  [*] Tree build chunks 600 -> 150 nodes: with the frame budget the
+      combined per-frame work must stay ~10 ms or the window still
+      stalls (observed live at the 76k-file smarttv partition).
+  [*] Progress text is ASCII-separated and "left" is localized - the
+      middot separators rendered as "?" on the EN locale and the
+      hardcoded Russian rendered as "????????" (Latin-only font).
+
+Patch Notes v0.3.2 (Soror L.'.L.'.):
+  [*] DPG item-click/toggle handlers never fired in the live window, so
+      the lazy expand-on-click design was dead: "..." placeholders
+      stayed forever. Removed every click dependency - after the fast
+      open, partitions list themselves sequentially in the background
+      (worker walk + chunked build, generation-guarded), "..." is
+      replaced by real content without any user input, and empty
+      partitions show "(empty)".
 
 Patch Notes v0.3.1 (Soror L.'.L.'.):
   [*] DocMobi-style fast open: scans are shallow (partition map +
@@ -104,6 +127,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 
 import dearpygui.dearpygui as dpg
 
@@ -368,10 +392,9 @@ class DataBrowserTab:
     def _apply_scan(self, root, diag=None):
         dpg.delete_item(self.ids["tree"], children_only=True)
         self._node_map = {}
-        self._lazy = {}
-        self._populated = set()
-        self._unlisted = {}
+        self._partition_keys = {}
         self._tree_busy = False
+        self._tree_gen = getattr(self, "_tree_gen", 0) + 1
         self.selected = None
         self.root_node = root
         # debug artifact: what the scan actually saw, tree format
@@ -389,12 +412,18 @@ class DataBrowserTab:
         dpg.set_value(self.ids["status"],
                       f"{len(root.children)} partitions, {size} dump"
                       + (f", device: {diag['device_preset']}"
-                         if diag and "device_preset" in diag else "")
-                      + " - expand a partition to list its files")
-        self._paint_progress_frac(1.0, "scan done (fast open)")
-        # shallow: partitions are arrows; a partition lists its FS tree
-        # on first expand (worker walk + chunked DPG build with progress)
+                         if diag and "device_preset" in diag else ""))
+        self._paint_progress_frac(0.0, "listing partitions...")
         self._add_nodes(root, self.ids["tree"], 0)
+        print("[data_browser] tree ready", flush=True)
+        # DPG item-click handlers proved unreliable in the live window, so
+        # nothing waits for clicks: partitions list themselves one by one
+        # (worker walk + chunked build); "..." turns into real content
+        parts = list(root.children)
+        if parts:
+            threading.Thread(target=self._auto_list_worker,
+                             args=(parts, self._tree_gen),
+                             daemon=True).start()
 
     def _add_nodes(self, node, parent, depth):
         for child in node.children:
@@ -406,67 +435,44 @@ class DataBrowserTab:
                     dpg.add_text(f"  {child.size} B  {child.fs_label}",
                                  color=(120, 120, 120))
                 if child.is_dir:
-                    self._attach_lazy(key, child)
+                    # expand arrow until the auto-listing fills it
+                    if depth == 0:
+                        self._partition_keys[id(child)] = key
+                    dpg.add_tree_node(parent=key, label="...")
 
-    def _attach_lazy(self, key, child):
-        # expand arrow for a not-yet-built dir; toggling replaces the
-        # placeholder with real children in the same frame
-        dpg.add_tree_node(parent=key, label="...")
-        if child.children:
-            self._lazy[key] = child
-        else:
-            self._unlisted[key] = child  # partition: needs FS listing
-        with dpg.item_handler_registry() as ihr:
-            dpg.add_item_toggled_open_handler(
-                callback=self._on_tree_toggled, user_data=key)
-            dpg.add_item_clicked_handler(
-                callback=self._on_tree_clicked, user_data=key)
-        dpg.bind_item_handler_registry(key, ihr)
-
-    def _on_tree_clicked(self, sender, app_data, user_data=None):
-        key = user_data if isinstance(user_data, int) else \
-            (app_data[0] if isinstance(app_data, (list, tuple)) else app_data)
-        node = self._node_map.get(key)
-        if node is None or not dpg.does_item_exist(self.ids["selected"]):
-            return
-        self.selected = node
-        dpg.set_value(self.ids["selected"],
-                      f"{node.name} ({node.size} B)")
-
-    def _on_tree_toggled(self, sender, app_data, user_data=None):
-        key = user_data if isinstance(user_data, int) else \
-            (app_data[0] if isinstance(app_data, (list, tuple)) else app_data)
-        if not isinstance(key, int) or key in self._populated:
-            return
-        if key in self._unlisted:
-            if self._tree_busy:
-                return  # one partition listing at a time; retry after
-            self._populated.add(key)
-            self._start_partition_listing(key, self._unlisted.pop(key))
-        elif key in self._lazy:
-            self._populated.add(key)
-            child = self._lazy.pop(key)
-            if not dpg.does_item_exist(key):
+    def _auto_list_worker(self, parts, gen):
+        """Background: list partitions sequentially, one walk at a time."""
+        total = len(parts)
+        for idx, node in enumerate(parts, 1):
+            while self._tree_busy:
+                if gen != self._tree_gen:
+                    return
+                time.sleep(0.05)
+            if gen != self._tree_gen:
                 return
-            for kid in dpg.get_item_children(key, 1):
-                dpg.delete_item(kid)
-            self._add_nodes(child, key, 2)
+            self._start_partition_listing(node, idx, total, gen)
 
-    def _start_partition_listing(self, key, node):
-        """Worker walk of one partition's FS, then chunked UI build."""
+    def _start_partition_listing(self, node, idx, total, gen):
+        """Walk one partition's FS in this worker, queue chunked build."""
         self._tree_busy = True
         name = node.name
-
-        def _stage(text):
-            self._paint_progress_frac(0.0, f"{name}: {text}")
-
-        _stage("listing filesystem...")
+        self.app.q.put(("call",
+                        lambda i=idx, t=total, n=name:
+                        self._set_status(
+                            f"listing partition {i}/{t}: {n}")))
+        self._paint_progress_frac((idx - 1) / max(1, total),
+                                  f"partition {idx}/{total}: {name}")
 
         def _work():
+            t_list = time.perf_counter()
             try:
                 info = self.browser.list_partition(node)
+                pct = idx / max(1, total) * 100.0
+                now = time.strftime("%H:%M:%S")
                 print(f"[data_browser] {name}: listed "
-                      f"({info['files']} files, {info['label']})", flush=True)
+                      f"({info['files']} files, {info['label']}, "
+                      f"{pct:.1f}%, {now} {idx}/{total}, "
+                      f"{time.perf_counter() - t_list:.1f}s)", flush=True)
                 plan: list[tuple] = []
 
                 def _plan(n, depth):
@@ -480,36 +486,49 @@ class DataBrowserTab:
                 self._tree_plan = plan
                 self._tree_total = max(1, len(plan))
                 self._tree_added = 0
-                self._tree_root_key = key
+                self._tree_root_key = self._partition_keys.get(id(node))
+                self._tree_first = True
+                self._tree_label = f"partition {idx}/{total}: {name}"
                 self.app.q.put(("call",
-                                lambda: self._build_partition_tree(name)))
+                                lambda g=gen:
+                                self._build_partition_tree(g)))
+                return
             except Exception as exc:  # noqa: BLE001
                 msg = f"{name}: listing failed: {exc}"
                 print(f"[data_browser] fallback: {msg}", flush=True)
                 self.app.q.put(("call",
                                 lambda msg=msg: self._set_status(msg)))
-            finally:
-                self._tree_busy = False
+            # listing failed: release the slot so the next partition goes
+            self._tree_busy = False
 
         threading.Thread(target=_work, daemon=True).start()
 
-    def _build_partition_tree(self, name):
+    def _build_partition_tree(self, gen):
         """GUI-thread chunk: build listed children, update the bar."""
-        if not self._tree_plan:
-            self._paint_progress_frac(1.0,
-                                      f"{name}: {self._tree_total} nodes")
+        if gen != self._tree_gen:
             return
-        batch = self._tree_plan[:600]
-        del self._tree_plan[:600]
+        root_key = getattr(self, "_tree_root_key", None)
+        if not self._tree_plan:
+            self._tree_busy = False
+            if root_key is not None and dpg.does_item_exist(root_key) \
+                    and not dpg.get_item_children(root_key, 1):
+                dpg.add_text("(empty)", parent=root_key, color=(120, 120, 120))
+            return
+        if self._tree_first:
+            self._tree_first = False
+            if root_key is not None and dpg.does_item_exist(root_key):
+                for kid in dpg.get_item_children(root_key, 1):
+                    dpg.delete_item(kid)  # the "..." placeholder
+        batch = self._tree_plan[:150]
+        del self._tree_plan[:150]
         for child, parent_node, depth in batch:
             self._add_listed_node(child, parent_node, depth)
         self._tree_added += len(batch)
         frac = self._tree_added / self._tree_total
         self._paint_progress_frac(frac,
-                                  f"{name}: {self._tree_added}/"
-                                  f"{self._tree_total} nodes")
-        self.app.q.put(("call",
-                        lambda: self._build_partition_tree(name)))
+                                  f"{self._tree_label} - "
+                                  f"{self._tree_added}/{self._tree_total}")
+        self.app.q.put(("call", lambda g=gen: self._build_partition_tree(g)))
 
     def _add_listed_node(self, child, parent_node, depth):
         if parent_node is None:
@@ -526,16 +545,6 @@ class DataBrowserTab:
                 dpg.add_text(f"  {child.size} B  {child.fs_label}",
                              color=(120, 120, 120))
             self._tree_keys[id(child)] = key
-            if child.is_dir and child.children:
-                # deeper dirs go lazy: arrows only, fill on toggle
-                dpg.add_tree_node(parent=key, label="...")
-                self._lazy[key] = child
-                with dpg.item_handler_registry() as ihr:
-                    dpg.add_item_toggled_open_handler(
-                        callback=self._on_tree_toggled, user_data=key)
-                    dpg.add_item_clicked_handler(
-                        callback=self._on_tree_clicked, user_data=key)
-                dpg.bind_item_handler_registry(key, ihr)
 
     # --- construction ------------------------------------------------------
     def build(self):
@@ -628,16 +637,17 @@ class DataBrowserTab:
             if done_label:
                 text = done_label
             else:
-                # DocMobi-style: partition counter first, then percent and
-                # the byte ticker - the counters stay prominent while the
-                # bar creeps through a long FS walk
+                # ASCII-only separators and a localized "left" word: the
+                # bar/status fonts must never meet raw non-ASCII layout
+                # glyphs (middot rendered as "?" on the EN locale)
+                size = getattr(self.source, "size", lambda: 0)()
                 parts = [getattr(self, "_progress_label", ""),
                          f"{frac * 100:.1f}%",
                          getattr(self, "_bytes_label", ""),
-                         ("осталось "
-                          f"{self._fmt_bytes((1 - frac) * getattr(self.source, 'size', lambda: 0)())}"
-                          if hasattr(self, "source") and frac < 1.0 else "")]
-                text = "  ·  ".join(p for p in parts if p)
+                         (f"{st.S('db_left')} "
+                          f"{self._fmt_bytes((1 - frac) * size)}"
+                          if size and frac < 1.0 else "")]
+                text = "  |  ".join(p for p in parts if p)
             dpg.configure_item(tag, default_value=self.app._bar(frac, 36))
             dpg.set_value(self.ids.get("progress_percent"), text)
         except Exception:

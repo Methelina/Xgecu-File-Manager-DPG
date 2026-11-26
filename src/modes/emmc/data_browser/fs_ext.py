@@ -4,21 +4,30 @@ Read-only: superblock, group descriptors, inodes, extent trees (ext4)
 and indirect blocks (ext2/3, depth <= 2).
 
 src/modes/emmc/data_browser/fs_ext.py
-Version:     0.1.0
+Version:     0.2.1
 Author:      Soror L.'.L.'
-Updated:     2026-11-22
+Updated:     2026-11-26
 
-Patch Notes v0.1.0 (Soror L.'.L.'):
-  [+] ExtVolume: superblock @1024 (magic 0xEF53), block size, group descriptors.
-  [+] Inodes: extent header 0xF30A (depth <= 1) and classic block pointers.
-  [+] listdir(): dirent records, root = inode 2.
-  [+] read_file(): full file content via extents/indirect blocks.
+Patch Notes v0.2.1 (Soror L.'.L.'.):
+  [*] Symlink node names are clean ("tee"); the target lives in
+      symlink_target - a "name -> target" display name contains ">"
+      which Windows forbids in file names, breaking extraction and
+      mount of resolved links.
+
+Patch Notes v0.2.0 (Soror L.'.L.'.):
+  [+] Symlink resolution: fast (target in i_block) and slow (target in
+      data blocks) links resolve through up to 8 hops to the real file -
+      entry then carries the target's inode/size/offset, so read_file
+      and the drive mount return the target's content. Display name
+      shows the real target ("sh -> toolbox"); unresolvable targets
+      (external paths, "..") stay 0-byte.
+  [*] ExtEntry gained parent_ino / symlink_target fields.
 """
 
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -28,6 +37,8 @@ class ExtEntry:
     size: int
     inode: int
     offset: int  # absolute offset of data start in the dump (0 when empty/special)
+    parent_ino: int = 2
+    symlink_target: str = field(default="")
 
 
 class ExtVolume:
@@ -168,13 +179,26 @@ class ExtVolume:
             ch_mode = struct.unpack_from("<H", ch, 0)[0]
             ch_type = ch_mode & 0xF000
             if ch_type == 0xA000:
-                # symlink: data blocks store the target path, not file content
-                ch_blocks = self._data_blocks(ch)
-                entries.append(ExtEntry(
-                    name=f"{name} -> (symlink)", is_dir=False, size=0,
-                    inode=child_ino,
-                    offset=self._block_offset(ch_blocks[0]) if ch_blocks else 0,
-                ))
+                # symlink: resolve the target to a real file when possible.
+                # The node name stays CLEAN (Windows forbids <> in file
+                # names - a "name -> target" label broke extraction and
+                # mount); the target goes to symlink_target / fs_label.
+                ch_size = self._inode_size_of(ch)
+                target = self._read_link_target(child_ino, ch_size)
+                resolved = self._resolve_link_path(target, ino)
+                if resolved is not None:
+                    r_ino, r_size, r_off = resolved
+                    entries.append(ExtEntry(
+                        name=name, is_dir=False, size=r_size,
+                        inode=r_ino, offset=r_off,
+                        parent_ino=ino, symlink_target=target,
+                    ))
+                else:
+                    entries.append(ExtEntry(
+                        name=name, is_dir=False, size=0,
+                        inode=child_ino, offset=0,
+                        parent_ino=ino, symlink_target=target,
+                    ))
                 continue
             ch_blocks = self._data_blocks(ch)
             entries.append(ExtEntry(
@@ -183,5 +207,68 @@ class ExtVolume:
                 size=self._inode_size_of(ch),
                 inode=child_ino,
                 offset=self._block_offset(ch_blocks[0]) if ch_blocks else 0,
+                parent_ino=ino,
             ))
         return entries
+
+    # --- symlink resolution -------------------------------------------------
+
+    def _read_link_target(self, ino: int, size: int) -> str:
+        """Symlink target path: fast links live in i_block, slow in blocks."""
+        inode = self._read_inode(ino)
+        i_blocks = struct.unpack_from("<I", inode, 28)[0]
+        if i_blocks == 0 and 0 < size <= 59:
+            raw = inode[40:40 + size]
+        else:
+            raw = self._read_file_blocks(ino, size)
+        return raw.decode("utf-8", errors="replace")
+
+    def _lookup(self, dir_ino: int, name: str) -> int | None:
+        """Inode number of `name` in directory `dir_ino`, raw (no resolve)."""
+        inode = self._read_inode(dir_ino)
+        if (struct.unpack_from("<H", inode, 0)[0] & 0xF000) != 0x4000:
+            return None
+        blob = self._read_file_blocks(dir_ino, self._inode_size_of(inode))
+        for child_ino, ch_name, _ftype in self._parse_dirents(blob):
+            if ch_name == name:
+                return child_ino
+        return None
+
+    def _resolve_link_path(self, target: str, parent_ino: int):
+        """Follow a symlink target to a real file; (ino, size, offset) or None.
+
+        Absolute targets restart at the root inode, relative ones at the
+        link's parent directory; chains up to 8 hops, ".." unsupported.
+        """
+        cur = 2 if target.startswith("/") else parent_ino
+        parts = [p for p in target.split("/") if p not in ("", ".")]
+        hops = 0
+        i = 0
+        while i < len(parts):
+            part = parts[i]
+            i += 1
+            if part == "..":
+                return None
+            nxt = self._lookup(cur, part)
+            if nxt is None:
+                return None
+            inode = self._read_inode(nxt)
+            ch_type = struct.unpack_from("<H", inode, 0)[0] & 0xF000
+            if ch_type == 0xA000:
+                hops += 1
+                if hops > 8:
+                    return None
+                t = self._read_link_target(nxt, self._inode_size_of(inode))
+                rest = [p for p in t.split("/") if p not in ("", ".")]
+                if t.startswith("/"):
+                    cur = 2
+                parts = rest + parts[i:]
+                i = 0
+                continue
+            if ch_type == 0x4000:
+                cur = nxt
+                continue
+            blocks = self._data_blocks(inode)
+            return (nxt, self._inode_size_of(inode),
+                    self._block_offset(blocks[0]) if blocks else 0)
+        return None  # target ended at a directory
