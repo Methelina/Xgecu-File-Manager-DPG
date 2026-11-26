@@ -1,8 +1,15 @@
 :: Xgecu Prog Installer & Portable Launcher by Soror L.'.L.'.
-:: Version: 3.1.0
-:: Updated: 2026-11-19
+:: Version: 3.2.0
+:: Updated: 2026-11-26
 ::
 :: Full functional equivalent of install_xgecu_prog.ps1 (no PowerShell).
+:: Patchnote v3.2.0 (Soror L.'.L.'.):
+::   [+] WinFsp driver step (4c): downloads winfsp msi from the official
+::       GitHub release and installs best-effort with a UAC prompt; declined
+::       install only disables the Data Browser drive-letter mount.
+::   [+] winfspy added to the critical import check.
+::   [*] Fixed v3.1.0 latent bug: the :step_imports label was missing, so
+::       any `goto step_imports` silently terminated the installer.
 :: Patchnote v3.1.0 (Soror L.'.L.'.):
 ::   [-] Removed legacy Kivy GUI support (menu options removed).
 ::       DPG-only from this version forward.
@@ -50,7 +57,7 @@ cls
 echo  ===========================================
 echo.
 echo   T48 eMMC Flasher - Xgecu Prog
-echo   Portable Installer v3.1.0 (uv)
+echo   Portable Installer v3.2.0 (uv)
 echo   Python 3.11 + DearPyGui 2.3
 echo   ===========================================
 echo.
@@ -267,10 +274,37 @@ if errorlevel 1 (
 ) else (
     call :log SUCCESS "Build dependencies installed."
 )
+:: ---- step 4c: WinFsp driver (drive-letter mount) ----
+set "WINFSPDLL=C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll"
+if exist "%WINFSPDLL%" (
+    call :log SUCCESS "WinFsp driver already present."
+    goto step_imports
+)
+set "WINFSPVER=2.2.26323"
+set "WINFSPURL=https://github.com/winfsp/winfsp/releases/download/v2.2/winfsp-%WINFSPVER%.msi"
+set "WINFSPMSI=%TMPD%\winfsp-%WINFSPVER%.msi"
+call :log INFO "WinFsp not found; downloading %WINFSPVER% (UAC prompt possible)..."
+curl -L -f --retry 3 --retry-delay 5 -o "%WINFSPMSI%" "%WINFSPURL%"
+if errorlevel 1 (
+    call :log WARN "Failed to download WinFsp; drive-letter mount will be unavailable."
+    goto step_imports
+)
+for %%F in ("%WINFSPMSI%") do set "MSISIZE=%%~zF"
+if %MSISIZE% LSS 100000 (
+    call :log WARN "WinFsp download corrupted; drive-letter mount will be unavailable."
+    goto step_imports
+)
+msiexec /i "%WINFSPMSI%" /qb
+if exist "%WINFSPDLL%" (
+    call :log SUCCESS "WinFsp %WINFSPVER% installed."
+) else (
+    call :log WARN "WinFsp install not confirmed (UAC declined?); drive-letter mount unavailable."
+)
 :: ---- step 5: critical imports ----
+:step_imports
 call :log INFO "Checking critical imports..."
 set "ALL_OK=1"
-for %%M in (dearpygui.dearpygui PIL) do (
+for %%M in (dearpygui.dearpygui PIL winfspy) do (
     "%PYTHON%" -c "import %%M" >nul 2>&1
     if errorlevel 1 (
         call :log ERROR "%%M NOT FOUND"

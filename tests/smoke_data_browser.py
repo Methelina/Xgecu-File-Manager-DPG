@@ -10,9 +10,12 @@ Run:
   xgecu_env\Scripts\python.exe -X utf8 tests\smoke_data_browser.py
 
 src/modes/emmc/data_browser -> tests/smoke_data_browser.py
-Version:     0.1.0
+Version:     0.2.0
 Author:      Soror L.'.L.'
-Updated:     2026-11-22
+Updated:     2026-11-25
+
+Patch Notes v0.2.0 (Soror L.'.L.'):
+  [+] GPT regressions: reject out-of-usable and overlapping partitions; verify the advertised backup LBA.
 
 Patch Notes v0.1.0 (Soror L.'.L.'):
   [+] Unit: GPT fixture (2 partitions, CRC ok), cmdline map fixture, RangeCache.
@@ -72,13 +75,15 @@ def make_gpt_fixture() -> bytes:
     struct.pack_into("<I", hdr, 8, 0x10000)   # revision
     struct.pack_into("<I", hdr, 12, 92)       # header size
     struct.pack_into("<QQ", hdr, 24, 1, total_sectors - 1)
+    struct.pack_into("<QQ", hdr, 40, 34, total_sectors - 34)
+    backup_lba = total_sectors - 6
     arr_lba = 2
     struct.pack_into("<Q", hdr, 72, arr_lba)
     struct.pack_into("<I", hdr, 80, 2)     # entry count
     struct.pack_into("<I", hdr, 84, 128)   # entry size
     entries = bytearray(2 * 128)
     for i, (name, first, last) in enumerate(
-            [("boot", 34, 133), ("data", 134, 4095)]):
+            [("boot", 34, 133), ("data", 134, total_sectors - 34)]):
         base = i * 128
         entries[base:base + 16] = bytes(range(16))  # non-zero type guid
         struct.pack_into("<QQ", entries, base + 0x20, first, last)
@@ -86,21 +91,45 @@ def make_gpt_fixture() -> bytes:
         entries[base + 0x38:base + 0x38 + len(nm)] = nm
     arr_crc = zlib.crc32(bytes(entries)) & 0xFFFFFFFF
     struct.pack_into("<I", hdr, 88, arr_crc)
-    hdr_crc = zlib.crc32(bytes(hdr)) & 0xFFFFFFFF
-    struct.pack_into("<I", hdr, 16, hdr_crc)
+    struct.pack_into("<Q", hdr, 32, backup_lba)
+    struct.pack_into("<I", hdr, 16, 0)
+    struct.pack_into("<I", hdr, 16, zlib.crc32(hdr) & 0xFFFFFFFF)
     img[ss:ss + 92] = hdr
     img[2 * ss:2 * ss + len(entries)] = entries
-    # backup header at last LBA
+    # backup header at the advertised backup LBA
     bak = bytearray(hdr)
-    struct.pack_into("<Q", bak, 32, total_sectors - 1)  # current lba (approx, ok for test)
+    struct.pack_into("<Q", bak, 24, backup_lba)
+    struct.pack_into("<Q", bak, 32, 1)
+    struct.pack_into("<Q", bak, 72, backup_lba - 1)
     struct.pack_into("<I", bak, 16, 0)
     bak_crc = zlib.crc32(bytes(bak)) & 0xFFFFFFFF
     struct.pack_into("<I", bak, 16, bak_crc)
-    img[(total_sectors - 1) * ss:(total_sectors - 1) * ss + 92] = bak
+    img[backup_lba * ss:backup_lba * ss + 92] = bak
+    img[(backup_lba - 1) * ss:(backup_lba - 1) * ss + len(entries)] = entries
     # content markers inside partitions
     img[34 * ss:34 * ss + 4] = b"\x27\x05\x19\x56"          # uImage
     img[134 * ss + 1024 + 56:134 * ss + 1024 + 58] = b"\x53\xef"  # ext magic
     return bytes(img)
+
+
+def rewrite_gpt_entries(img: bytes, first_ranges: list[tuple[int, int]]) -> bytes:
+    """Return a fixture with changed partition LBAs and valid primary CRCs."""
+    data = bytearray(img)
+    header = bytearray(data[512:1024])
+    entry_lba = struct.unpack_from("<Q", header, 72)[0]
+    count = struct.unpack_from("<I", header, 80)[0]
+    entry_size = struct.unpack_from("<I", header, 84)[0]
+    entries = bytearray(data[entry_lba * 512:entry_lba * 512 + count * entry_size])
+    for index, (first, last) in enumerate(first_ranges):
+        struct.pack_into("<QQ", entries, index * entry_size + 0x20, first, last)
+    data[entry_lba * 512:entry_lba * 512 + len(entries)] = entries
+    struct.pack_into("<I", header, 88, zlib.crc32(entries) & 0xFFFFFFFF)
+    struct.pack_into("<I", header, 16, 0)
+    header_size = struct.unpack_from("<I", header, 12)[0]
+    struct.pack_into("<I", header, 16,
+                     zlib.crc32(header[:header_size]) & 0xFFFFFFFF)
+    data[512:1024] = header
+    return bytes(data)
 
 
 def make_fat16_fixture() -> bytes:
@@ -173,6 +202,15 @@ def unit_tests() -> bool:
     ok &= check("gpt: array crc ok", diag.get("gpt_array_crc_ok") is True)
     ok &= check("gpt: names", [p.name for p in parts] == ["boot", "data"])
     ok &= check("gpt: sizes inclusive", parts[0].size == (133 - 34 + 1) * 512)
+    ok &= check("gpt: backup at advertised LBA", diag.get("gpt_backup_present") is True)
+    _, outside_diag = build_partition_map(
+        MemSource(rewrite_gpt_entries(gpt_img, [(34, 133), (134, 4095)])))
+    outside_usable = "gpt_invalid" in outside_diag
+    ok &= check("gpt: reject partition outside usable range", outside_usable)
+    _, overlap_diag = build_partition_map(
+        MemSource(rewrite_gpt_entries(gpt_img, [(34, 133), (100, 200)])))
+    overlaps = "gpt_invalid" in overlap_diag
+    ok &= check("gpt: reject overlapping partitions", overlaps)
     ok &= check("signatures: uImage marker",
                 identify(gsrc, parts[0].offset, parts[0].size) == "uImage")
     ok &= check("signatures: ext marker",
@@ -220,6 +258,16 @@ E2E_PATH_XIAOMI = (r"K:\work\ChipTune\TV_Repo\Xiaomi_L43M7-EARU\firmware"
                    r"\TD.MT9612.795\USER_0x0000000000_0x039F000000_backup.bin")
 
 
+def find_node_equiv(part_node, target):
+    """Locate the equivalent of `target` in a freshly built partition subtree
+    by name+offset; filesystem backends have no stable path identity."""
+    for n in part_node.walk():
+        if not n.is_dir and n.name == target.name \
+                and n.offset == target.offset and n.size == target.size:
+            return n
+    return None
+
+
 def e2e_tests(dump_path: str | None = None, shallow: bool = False) -> bool:
     path = dump_path or os.environ.get("EMMC_DATA_PATH", E2E_PATH_DEFAULT)
     if not os.path.exists(path):
@@ -263,7 +311,9 @@ def e2e_tests(dump_path: str | None = None, shallow: bool = False) -> bool:
         print("[INFO] device preset:", diag2["device_preset"])
     total_files = 0
     extracted = 0
-    out_dir = Path(__file__).resolve().parents[1] / "tmp" / "e2e_extract"
+    out_dir = Path(os.environ.get(
+        "EMMC_E2E_EXTRACT_DIR",
+        Path(__file__).resolve().parents[1] / "tmp" / "e2e_extract"))
     out_dir.mkdir(parents=True, exist_ok=True)
     import hashlib
     for node in root.children:
@@ -293,8 +343,11 @@ def e2e_tests(dump_path: str | None = None, shallow: bool = False) -> bool:
                                                        max_chunks=512))
                 root_fresh, _ = browser_fresh.build()
                 for f in picked:
-                    nf = root_fresh.find(f"{node.name}/{f.name}")
+                    part_fresh = next(
+                        (c for c in root_fresh.children if c.name == node.name), None)
+                    nf = find_node_equiv(part_fresh, f) if part_fresh else None
                     if nf is None:
+                        ok &= check(f"e2e: independent node found {f.name}", False)
                         continue
                     h1 = hashlib.sha256(browser.read_node(f)).hexdigest()
                     h2 = hashlib.sha256(browser_fresh.read_node(nf)).hexdigest()

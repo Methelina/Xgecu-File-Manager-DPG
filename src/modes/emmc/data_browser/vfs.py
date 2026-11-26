@@ -8,9 +8,14 @@ Backends registered by fs label from signatures.identify():
   others            -> raw partition node (no file listing yet)
 
 src/modes/emmc/data_browser/vfs.py
-Version:     0.1.0
+Version:     0.2.0
 Author:      Soror L.'.L.'
-Updated:     2026-11-22
+Updated:     2026-11-26
+
+Patch Notes v0.2.0 (Soror L.'.L.'.):
+  [+] DataBrowser.list_partition(): deferred FS listing of one partition
+      (shallow build companion) - lets the GUI open huge dumps instantly
+      and walk a partition's filesystem on demand.
 
 Patch Notes v0.1.0 (Soror L.'.L.'):
   [+] VfsNode dataclass: unified tree node (name, is_dir, size, offset, children).
@@ -238,6 +243,38 @@ class DataBrowser:
             if not n.is_dir:
                 n.fs_label = n.fs_label or ("known-ext" if self.profiles.is_known_extension(n.name) else "")
         return root, diag
+
+    def list_partition(self, part_node: VfsNode) -> dict:
+        """Build the FS tree of one partition node (shallow build companion).
+
+        Runs on a worker thread; mutates only this partition node. Returns
+        {"label", "files"} diagnostics for the progress label.
+        """
+        label = part_node.fs_label
+        if not label or label == "unknown":
+            label = identify(self.src, part_node.offset, part_node.size,
+                             self.profiles)
+            part_node.fs_label = label
+        if label in ("empty:00", "empty:ff"):
+            return {"label": label, "files": 0}
+        part = None
+        if isinstance(part_node.read_key, tuple) \
+                and part_node.read_key[0] == "raw":
+            part = part_node.read_key[1]
+        if part is None:
+            return {"label": label, "files": 0}
+        holder: list = []
+        children = _fs_children(self.src, part, label, holder)
+        part_node.children = children
+        if holder:
+            part_node.backend = holder[0]
+        for n in part_node.walk():
+            if not n.is_dir:
+                n.fs_label = n.fs_label or ("known-ext"
+                                            if self.profiles.is_known_extension(n.name)
+                                            else "")
+        files = sum(1 for n in part_node.walk() if not n.is_dir)
+        return {"label": label, "files": files}
 
     def read_node(self, node: VfsNode) -> bytes:
         """Full content of a file node (FS backend) or a whole raw partition."""

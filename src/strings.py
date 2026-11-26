@@ -1,6 +1,26 @@
 """UI strings, RU/EN. S(key) returns the string for the active language.
 Backend messages (journal, EXT_CSD descriptions, file statuses) stay as
-they arrive; only static UI text is localized."""
+they arrive; only static UI text is localized.
+
+src/strings.py
+Version:     0.2.2
+Author:      Soror L.'.L.'
+Updated:     2026-11-26
+
+Patch Notes v0.2.2 (Soror L.'.L.'.):
+  [+] db_mount_stage / db_mount_failed for the Data Browser mount
+      status bar with per-stage progress.
+
+Patch Notes v0.2.1 (Soror L.'.L.'.):
+  [*] db_mount_need_dir replaced by db_mount_need_scan (whole-dump mount).
+
+Patch Notes v0.2.0 (Soror L.'.L.'):
+  [+] Data Browser mount strings (mount/unmount buttons, WinFsp absence,
+      no free letter, mount/unmount status).
+
+Patch Notes v0.1.0 (Soror L.'.L.'.):
+  [+] Initial RU/EN string table for the DPG frontend.
+"""
 
 _LANG = "en"
 
@@ -12,6 +32,26 @@ STRINGS = {
     "db_scan": {"en": "Scan partitions", "ru": "Сканировать разделы"},
     "db_save_file": {"en": "Save selected", "ru": "Сохранить выбранное"},
     "db_none": {"en": "No partitions scanned yet.", "ru": "Разделы ещё не просканированы."},
+    "db_mount": {"en": "Mount as drive", "ru": "Монтировать как диск"},
+    "db_unmount_all": {"en": "Unmount all", "ru": "Отмонтировать все"},
+    "db_mount_need_scan": {"en": "Mount: open a dump or scan the chip first.",
+                           "ru": "Монтирование: сначала откройте дамп или просканируйте чип."},
+    "db_mount_no_winfsp": {"en": "Mount unavailable: WinFsp is not installed.",
+                           "ru": "Монтирование недоступно: WinFsp не установлен."},
+    "db_mount_no_letter": {"en": "Mount: no free drive letter (R..Z).",
+                           "ru": "Монтирование: нет свободной буквы диска (R..Z)."},
+    "db_mount_ok": {"en": "Mounted {d}: (read-only).",
+                    "ru": "Смонтировано {d}: (только чтение)."},
+    "db_mount_stage": {"en": "Mount: {s}", "ru": "Монтирование: {s}"},
+    "db_mount_failed": {"en": "Mount failed: {e}",
+                        "ru": "Ошибка монтирования: {e}"},
+    "db_lamp_hint": {"en": "Drive state: gray = none, yellow = mounting, "
+                          "green = mounted, red = failed.",
+                     "ru": "Состояние диска: серый = нет, жёлтый = "
+                           "монтируется, зелёный = смонтирован, "
+                           "красный = ошибка."},
+    "db_unmount_ok": {"en": "Unmounted {n} drive(s).",
+                      "ru": "Отмонтировано дисков: {n}."},
     "db_need_init": {"en": "Browse live chip after Init eMMC, or open a dump file.", "ru": "Живой чип после Init eMMC или откройте файл дампа."},
     "tab_nand": {"en": "NAND [SOON]", "ru": "NAND [СКОРО]"},
     "tab_spi": {"en": "SPI [SOON]", "ru": "SPI [СКОРО]"},

@@ -10,9 +10,15 @@ Marker strings parsed from stdout:
   warning: "WARNING: Checksum mismatch"
 
 src/modes/emmc/data_browser/tools_runner.py
-Version:     0.1.0
+Version:     0.1.1
 Author:      Soror L.'.L.'
-Updated:     2026-11-22
+Updated:     2026-11-25
+
+Patch Notes v0.1.1 (Soror L.'.L.'):
+  [+] Fixed run_aes_decrypt argument order: the exe CLI is
+      "<e|d> <in> <out> <keyfile>" (verified empirically; the previous
+      key-second order made the exe treat the partition head as the key file
+      and fail with "error key format").
 
 Patch Notes v0.1.0 (Soror L.'.L.'):
   [+] ToolsRunner: locate tool in assets/tools, run with args, capture output.
@@ -87,7 +93,9 @@ class ToolsRunner:
     def run_aes_decrypt(self, in_path: str, out_path: str,
                         key_file: str | None = None) -> ToolResult:
         key = key_file or os.path.join(self.tools_dir, "DEK_part.bin")
-        return self._run([self._tool("aescrypt2.exe"), "d", key, in_path, out_path])
+        # exe CLI: <e|d> <in> <out> <keyfile> (raw 16-byte key file)
+        return self._run([self._tool("aescrypt2.exe"), "d", in_path,
+                          out_path, key])
 
     @staticmethod
     def aes_decrypt_native(in_path: str, out_path: str,

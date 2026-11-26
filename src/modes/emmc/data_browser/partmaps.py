@@ -5,9 +5,26 @@ cmdline map mt53xx-emmc:/blkdevparts=mmcblk0: (Linux kernel cmdline format).
 LBA ranges are inclusive: size = (last - first + 1) * sector_size.
 
 src/modes/emmc/data_browser/partmaps.py
-Version:     0.1.0
+Version:     0.2.3
 Author:      Soror L.'.L.'
-Updated:     2026-11-22
+Updated:     2026-11-25
+
+Patch Notes v0.2.3 (Soror L.'.L.'):
+  [+] Reject GPT CRC mismatches and support header reads limited to declared CRC coverage.
+
+Patch Notes v0.2.2 (Soror L.'.L.'):
+  [+] Validate full logical sectors and reject entry arrays overlapping the backup header.
+
+Patch Notes v0.2.1 (Soror L.'.L.'):
+  [+] Reject truncated GPT headers and usable-LBA ranges overlapping GPT metadata.
+
+Patch Notes v0.2.0 (Soror L.'.L.'):
+  [+] GPT safety validation: header size/CRC coverage, LBA geometry (current/
+      backup/usable/array), entry size (>=128, 8-byte aligned), bounded array
+      read (<= 16 MiB) with exact byte count, per-partition bounds within
+      usable LBAs and source sectors, overlap rejection; malformed GPT raises
+      ValueError (caught by build_partition_map, falls through), backup header
+      located via primary backup_lba instead of last sector.
 
 Patch Notes v0.1.0 (Soror L.'.L.'):
   [+] Partition dataclass (name, offset, size, kind).
@@ -50,24 +67,85 @@ class GptInfo:
     backup_lba: int
 
 
+# Bound on the entry array read, chosen so real GPT dumps (<= 128 entries of
+# 128 bytes by spec convention) pass with a wide margin while a malicious
+# header cannot trigger an unbounded allocation.
+_GPT_ARRAY_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _read_gpt_header(src, sector_size: int) -> bytes:
+    """Primary header bytes at LBA1; empty when absent or truncated."""
+    if sector_size < 512 or sector_size > 65536 or sector_size & (sector_size - 1):
+        return b""
+    if src.size() < sector_size * 2:
+        return b""
+    hdr = src.read(sector_size, 92)
+    if len(hdr) < 92 or hdr[0:8] != b"EFI PART":
+        return b""
+    return hdr
+
+
 def read_gpt(src, sector_size: int = 512) -> GptInfo | None:
-    """GPT header at LBA1; None when the signature is absent."""
-    hdr = src.read(sector_size, 0x60)
-    if hdr[0:8] != b"EFI PART":
+    """GPT header at LBA1; None when the signature is absent.
+
+    Raises ValueError on a malformed GPT (bad header geometry, unusable
+    entry array, out-of-bounds or overlapping partitions).
+    """
+    hdr = _read_gpt_header(src, sector_size)
+    if not hdr:
         return None
+    total_sectors = src.size() // sector_size
     (
         _sig, _rev, _hsize, _crc, _rsv, cur_lba, bak_lba, first_lba, last_lba,
         disk_guid, arr_lba, n_entries, entry_size, arr_crc,
     ) = struct.unpack("<8sIIIIQQQQ16sQIII", hdr[:92])
-    if not 0 < _hsize <= len(hdr):
-        _hsize = 92
 
+    if not 92 <= _hsize <= sector_size:
+        raise ValueError(f"gpt: bad header size {_hsize}")
+    if cur_lba != 1:
+        raise ValueError(f"gpt: header LBA {cur_lba} != 1")
+    if not 0 < bak_lba < total_sectors:
+        raise ValueError(f"gpt: backup LBA {bak_lba} out of source")
+    if bak_lba == cur_lba:
+        raise ValueError("gpt: primary and backup headers share an LBA")
+    if not 2 <= first_lba <= last_lba < total_sectors or \
+            first_lba <= bak_lba <= last_lba:
+        raise ValueError(f"gpt: usable LBA range {first_lba}..{last_lba} invalid")
+    if entry_size < 128 or entry_size % 8 != 0:
+        raise ValueError(f"gpt: bad entry size {entry_size}")
+    if n_entries == 0:
+        raise ValueError("gpt: zero entries")
+    arr_offset = arr_lba * sector_size
+    arr_bytes = n_entries * entry_size
+    if not 2 <= arr_lba < total_sectors:
+        raise ValueError(f"gpt: array LBA {arr_lba} out of source")
+    if arr_bytes > _GPT_ARRAY_MAX_BYTES:
+        raise ValueError(f"gpt: array size {arr_bytes} exceeds bound")
+    if arr_offset + arr_bytes > src.size():
+        raise ValueError("gpt: entry array exceeds source")
+    arr_end_lba = (arr_offset + arr_bytes + sector_size - 1) // sector_size
+    if arr_lba <= cur_lba < arr_end_lba or \
+            first_lba < arr_end_lba and arr_lba <= last_lba:
+        raise ValueError("gpt: primary entry array overlaps header or usable LBAs")
+    if arr_lba <= bak_lba < arr_end_lba:
+        raise ValueError("gpt: primary entry array overlaps backup header")
+    arr = src.read(arr_offset, arr_bytes)
+    if len(arr) != arr_bytes:
+        raise ValueError("gpt: truncated entry array read")
+
+    if _hsize > len(hdr):
+        extra = src.read(sector_size + len(hdr), _hsize - len(hdr))
+        if len(extra) != _hsize - len(hdr):
+            raise ValueError("gpt: truncated header CRC data")
+        hdr += extra
     zeroed = bytearray(hdr[:_hsize])
     zeroed[0x10:0x14] = b"\x00\x00\x00\x00"
     ok_header = crc32(bytes(zeroed)) == _crc
-
-    arr = src.read(arr_lba * sector_size, n_entries * entry_size)
     ok_array = crc32(arr) == arr_crc
+    if not ok_header:
+        raise ValueError("gpt: header CRC mismatch")
+    if not ok_array:
+        raise ValueError("gpt: entry array CRC mismatch")
 
     parts: list[Partition] = []
     for i in range(n_entries):
@@ -76,7 +154,9 @@ def read_gpt(src, sector_size: int = 512) -> GptInfo | None:
             break
         first, last = struct.unpack_from("<QQ", e, 0x20)
         if last < first:
-            continue
+            raise ValueError(f"gpt: entry {i}: last {last} < first {first}")
+        if first < first_lba or last > last_lba or last >= total_sectors:
+            raise ValueError(f"gpt: entry {i}: range {first}..{last} out of bounds")
         raw_name = e[0x38:0x80].decode("utf-16-le", errors="replace")
         name = raw_name.split("\x00")[0]
         parts.append(Partition(
@@ -85,13 +165,25 @@ def read_gpt(src, sector_size: int = 512) -> GptInfo | None:
             size=(last - first + 1) * sector_size,
             kind="gpt",
         ))
+    ordered = sorted(parts, key=lambda p: p.offset)
+    for a, b in zip(ordered, ordered[1:]):
+        if a.offset + a.size > b.offset:
+            raise ValueError(
+                f"gpt: overlapping partitions '{a.name}' and '{b.name}'")
     return GptInfo(ok_header_crc=ok_header, ok_array_crc=ok_array,
                    partitions=parts, backup_lba=bak_lba)
 
 
 def check_backup_gpt(src, sector_size: int = 512) -> bool:
-    tail = src.read(src.size() - sector_size, 8)
-    return tail[0:8] == b"EFI PART"
+    """Backup header signature at the LBA advertised by the primary header."""
+    hdr = _read_gpt_header(src, sector_size)
+    if not hdr:
+        return False
+    bak_lba = struct.unpack_from("<Q", hdr, 0x20)[0]
+    off = bak_lba * sector_size
+    if bak_lba <= 0 or off + 8 > src.size():
+        return False
+    return src.read(off, 8)[0:8] == b"EFI PART"
 
 
 _CMDLINE_MARKERS = (
@@ -219,7 +311,11 @@ def parse_mstar_pt(src) -> list[Partition] | None:
 def build_partition_map(src, sector_size: int = 512) -> tuple[list[Partition], dict]:
     """Priority: GPT -> MStar PT -> cmdline -> MBR placeholder."""
     diag: dict = {}
-    gpt = read_gpt(src, sector_size)
+    try:
+        gpt = read_gpt(src, sector_size)
+    except (ValueError, struct.error) as exc:
+        diag["gpt_invalid"] = str(exc)
+        gpt = None
     if gpt is not None:
         diag["gpt_header_crc_ok"] = gpt.ok_header_crc
         diag["gpt_array_crc_ok"] = gpt.ok_array_crc

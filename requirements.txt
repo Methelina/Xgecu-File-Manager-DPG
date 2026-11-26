@@ -7,3 +7,7 @@ py7zr>=0.20
 python-lzo>=1.15
 PySquashfsImage>=0.9
 dissect.squashfs>=1.12
+
+# data_browser drive-letter mount (user-mode FS over WinFsp driver);
+# WinFsp driver itself is installed by install_xgecu_prog.ps1/.bat
+winfspy==0.8.4

@@ -1,10 +1,15 @@
 <#
 .SYNOPSIS
     Xgecu Prog Installer & Portable Launcher by Soror L.'.L.'.
-    Version: 2.2.0
-    Updated: 2026-11-19
+    Version: 2.3.0
+    Updated: 2026-11-26
 
 .DESCRIPTION
+    Patchnote v2.3.0 (Soror L.'.L.'.):
+      [+] WinFsp driver step (4c): downloads winfsp msi from the official
+          GitHub release and installs best-effort with a UAC prompt; declined
+          install only disables the Data Browser drive-letter mount.
+      [+] winfspy==0.8.4 added to the dependency check list.
     Patchnote v2.2.0 (Soror L.'.L.'.):
       [-] Removed legacy Kivy GUI support (gui.py, gui.kv, kivy deps).
           DPG-only from this version forward.
@@ -259,11 +264,41 @@ function Install-XgecuProg {
         else { Write-Status "Build dependency install reported warnings (see logs\install.log)" "WARN" }
     }
 
+    # ---- 4c. WinFsp driver (Data Browser drive-letter mount) ----
+    # winfspy (requirements.txt) needs the WinFsp runtime; best-effort:
+    # a declined UAC keeps everything else working, only the drive
+    # mount feature stays unavailable.
+    $WinfspDll = "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll"
+    if (Test-Path $WinfspDll) {
+        Write-Status "WinFsp driver already present." "SUCCESS"
+    } else {
+        $WinfspVersion = "2.2.26323"
+        $WinfspUrl = "https://github.com/winfsp/winfsp/releases/download/v2.2/winfsp-$WinfspVersion.msi"
+        $WinfspMsi = Join-Path $TmpDir "winfsp-$WinfspVersion.msi"
+        Write-Status "WinFsp not found; downloading $WinfspVersion (UAC prompt possible)..." "INFO"
+        $dlOk = Invoke-WithRetry -Script {
+            Invoke-WebRequest -Uri $WinfspUrl -OutFile $WinfspMsi -UseBasicParsing -ErrorAction Stop
+            if (-not (Test-Path $WinfspMsi)) { throw "download failed" }
+            if ((Get-Item $WinfspMsi).Length -lt 100000) { throw "download corrupted" }
+        } -MaxAttempts 3 -DelaySec 5
+        if (-not $dlOk) {
+            Write-Status "Failed to download WinFsp; drive-letter mount will be unavailable." "WARN"
+        } else {
+            $msiProc = Start-Process msiexec -ArgumentList "/i", "`"$WinfspMsi`"", "/qb" -Wait -PassThru
+            if (Test-Path $WinfspDll) {
+                Write-Status "WinFsp $WinfspVersion installed." "SUCCESS"
+            } else {
+                Write-Status "WinFsp install not confirmed (UAC declined?); drive-letter mount unavailable." "WARN"
+            }
+        }
+    }
+
     # ---- 5. Critical imports ----
     Write-Status "Checking critical imports..." "INFO"
     $Modules = @(
         "dearpygui.dearpygui",
-        "PIL"
+        "PIL",
+        "winfspy"
     )
     $AllOK = $true
     foreach ($mod in $Modules) {
@@ -306,7 +341,7 @@ function Show-Menu {
     Write-Host " ===========================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  T48 eMMC Flasher - Xgecu Prog" -ForegroundColor Yellow
-    Write-Host "  Portable Launcher v2.2.0 (uv)" -ForegroundColor Green
+        Write-Host "  Portable Launcher v2.3.0 (uv)" -ForegroundColor Green
     Write-Host "  Python 3.11 + DearPyGui 2.3" -ForegroundColor Cyan
     Write-Host "  ===========================================" -ForegroundColor Cyan
     Write-Host ""

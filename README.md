@@ -109,6 +109,7 @@ hardware evidence are tracked in [docs/TESTING.md](docs/TESTING.md).
 | [Architecture](docs/ARCHITECTURE.md) | layers, threads, WinUSB, STOP model |
 | [Build](docs/BUILD.md) | environment, dependencies, PyInstaller |
 | [Testing](docs/TESTING.md) | smoke tests, factual results |
+| [Mount roadmap](docs/MOUNT_ROADMAP.md) | read-write drive mount plan (future duplex) |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | known errors and limitations |
 | [Research](docs/RESEARCH.md) | probes, archived 40 MHz modes |
 
