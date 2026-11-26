@@ -1,8 +1,13 @@
 :: Xgecu Prog Runtime Launcher by Soror L.'.L.'.
-:: Version: 3.1.0
-:: Updated: 2026-11-19
+:: Version: 3.2.0
+:: Updated: 2026-11-27
 ::
 :: Full functional equivalent of run_xgecu_prog.ps1 (no PowerShell).
+:: Patchnote v3.2.0 (Soror L.'.L.'.):
+::   [+] Zombie-kill also matches the command line (gui_dpg.py /
+::       mount_host.py): windowless orphans (piped/daemon launches,
+::       foreign interpreters) have no 'Xgecu' window title and were
+::       invisible to the old exe-path/title filters.
 :: Patchnote v3.1.0 (Soror L.'.L.'.):
 ::   [-] Removed legacy Kivy GUI support (-Legacy switch removed).
 ::       DPG-only from this version forward.
@@ -58,6 +63,16 @@ for /f "tokens=2 delims=," %%P in ('wmic process where "name='python.exe'" get P
     taskkill /F /PID %%P >nul 2>&1
     set "KILLED=1"
 )
+for /f "tokens=2 delims=," %%P in ('wmic process where "name='python.exe'" get ProcessId^,CommandLine /format:csv 2^>nul ^| find /i "gui_dpg.py"') do (
+    echo [RUNNER] [INFO] Killing stale process: PID=%%P ^(cmdline gui_dpg.py^)
+    taskkill /F /PID %%P >nul 2>&1
+    set "KILLED=1"
+)
+for /f "tokens=2 delims=," %%P in ('wmic process where "name='python.exe'" get ProcessId^,CommandLine /format:csv 2^>nul ^| find /i "mount_host.py"') do (
+    echo [RUNNER] [INFO] Killing stale process: PID=%%P ^(cmdline mount_host.py^)
+    taskkill /F /PID %%P >nul 2>&1
+    set "KILLED=1"
+)
 taskkill /F /FI "WINDOWTITLE eq Xgecu*" /IM python.exe >nul 2>&1
 if "%KILLED%"=="1" (
     timeout /t 1 /nobreak >nul
@@ -69,7 +84,7 @@ if "%KILLED%"=="1" (
 :: ============================================================
 pushd "%ROOT%"
 echo [INFO] Launcher: Starting Xgecu Prog (DearPyGui)...
-"%PYTHON%" -X utf8 "src\gui_dpg.py"
+"%PYTHON%" -X utf8 "src\gui_dpg.py" %*
 set "EXITCODE=%ERRORLEVEL%"
 popd
 echo [RUNNER] App exited with code %EXITCODE%.

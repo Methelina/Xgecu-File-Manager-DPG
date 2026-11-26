@@ -7,9 +7,95 @@ Two input modes: a dump file (always available, read-only) or the live chip
 SessionSource after Init eMMC. The dump is never written to.
 
 src/gui_data_browser.py
-Version:     0.3.4
+Version:     0.4.5
 Author:      Soror L.'.L.'
-Updated:     2026-11-26
+Updated:     2026-11-27
+
+Patch Notes v0.4.5 (Soror L.'.L.'.):
+  [*] The progress bar no longer keeps the last listing step (94.1%)
+      after everything succeeded: successful mount paints it done at
+      100% with the mounted letter; Unmount All resets it to 0%.
+
+Patch Notes v0.4.4 (Soror L.'.L.'.):
+  [*] Final simplification per user decision: no DPG file tree, no
+      FIND, no BROWSE pane - open dump lists the model in the
+      background (bar + log), then auto-mounts the drive; the file
+      level lives in Windows Explorer. Tab layout: source buttons,
+      status, MOUNT block, progress bar, LOG.
+
+Patch Notes v0.4.3 (Soror L.'.L.'.):
+  [+] In-GUI LOG box (200 lines, timestamped) mirroring the console
+      [data_browser] lines, next to the phase status bars.
+  [*] Search index includes zero-byte files too (the selftest caught
+      205 missing files - the index filtered size > 0).
+
+Patch Notes v0.4.2 (Soror L.'.L.'.):
+  [*] Open dump now goes straight to the drive: fast open -> background
+      listing (bar shows per-partition progress) -> automatic read-only
+      mount of the fully listed model. The DPG tree stage is no longer
+      on the critical path (it stays as a first-level preview); full
+      depth is browsed in Explorer via the drive, in the BROWSE pane
+      and in FIND.
+  [+] BROWSE pane: Explorer-style navigation of any folder (listbox +
+      Open/Up/Save buttons - button callbacks work, item handlers do
+      not), backed by the fully listed model.
+
+Patch Notes v0.4.1 (Soror L.'.L.'.):
+  [*] Depth cap reverted (user decision: the tree is the user's view of
+      the firmware - no content limiting). Full-depth build stays, now
+      with adaptive chunk pacing (150 -> 20 nodes when a chunk costs
+      > 16 ms, growing back below 6 ms) inside the 8 ms frame budget.
+      The FIND FILE block stays as a complement.
+
+Patch Notes v0.4.0 (Soror L.'.L.'.):
+  [*] THE render budget is now architectural: the tree renders only the
+      top two levels; the full-depth walk feeds a filename search index
+      instead of DPG widgets. Measured again and again: DPG freezes for
+      seconds per frame past ~40k flat nodes and crashes at 165k - no
+      watchdog can fix that, it is render work, not a hang.
+  [+] FIND FILE block (input + Find + results list + Save selected,
+      button-driven only): substring search over every listed file of
+      the dump, extract to tmp/extract/. Whole-dump browsing stays on
+      the mounted drive (Explorer handles millions of files).
+
+Patch Notes v0.3.9 (Soror L.'.L.'.):
+  [*] Mount got its own framed block in the tab: MOUNT header, the
+      Mount/Unmount buttons, the drive lamp with the mounted letter and
+      the dedicated mount report line - instead of buttons scattered
+      across the shared toolbar row.
+
+Patch Notes v0.3.8 (Soror L.'.L.'.):
+  [+] Dedicated mount report line under the buttons: stages, the final
+      "Mounted P: (read-only)" and errors go there - the scan
+      auto-listing owned the shared status and buried every mount
+      report (user-visible: clicking Mount "did nothing").
+  [*] The lamp shows the mounted letter ("● P:") and turns green on
+      success; Unmount All resets it.
+  [*] Auto-listing stopped overwriting the general status per
+      partition (its progress lives in the bar label now).
+
+Patch Notes v0.3.7 (Soror L.'.L.'.):
+  [*] Deterministic tree build: a failing node is skipped and named in
+      the console ("fallback: node 'x' skipped") but the batch chain
+      always continues - the bar now finishes every partition's plan
+      at 100% instead of stopping at a random percent per run.
+
+Patch Notes v0.3.6 (Soror L.'.L.'.):
+  [+] Disambiguated the two phases: console now logs "tree built
+      (N nodes, Xs)" when the DPG build of a partition finishes, and
+      the GUI bar label says "building tree ..." - the console percent
+      is the listing phase, the GUI percent is the node build, they
+      legitimately differ while a big partition (smarttv: 160k nodes)
+      is still being rendered in chunks.
+
+Patch Notes v0.3.5 (Soror L.'.L.'.):
+  [*] Auto-continue on stalls: a failing build chunk logs a fallback
+      line, releases the partition slot and drops the rest of that
+      partition's plan instead of wedging _tree_busy forever; the
+      auto-listing watchdog force-continues after 120 s without
+      movement. Random-percent "freezes" were one exception inside a
+      queued callback killing the whole drain loop (gui_dpg side
+      guards every event now).
 
 Patch Notes v0.3.4 (Soror L.'.L.'.):
   [+] Console "listed" lines carry the live scan state: overall percent,
@@ -126,8 +212,10 @@ Patch Notes v0.1.0 (Soror L.'.L.'):
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
+from pathlib import Path
 
 import dearpygui.dearpygui as dpg
 
@@ -287,6 +375,10 @@ class DataBrowserTab:
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    # NOTE: no in-GUI file search / browse pane - after the automatic
+    # drive mount the file level lives in Windows Explorer, which handles
+    # any depth and file count natively (user decision, 2026-11-26).
+
     def on_mount_selected(self):
         # Whole dump by default: every scanned partition becomes a folder
         # of one read-only drive; an explicit folder selection narrows it.
@@ -307,27 +399,33 @@ class DataBrowserTab:
                 if not is_available():
                     self.app.q.put(("call", self._mount_lamp_red))
                     self.app.q.put(("call",
-                                    lambda: self._set_status(
+                                    lambda: self._set_mount_status(
                                         st.S("db_mount_no_winfsp"))))
                     return
                 self.app.q.put(("call", self._mount_lamp_busy))
 
                 def _stage(text):
                     self.app.q.put(("call",
-                                    lambda s=text: self._set_status(
+                                    lambda s=text: self._set_mount_status(
                                         st.S("db_mount_stage").format(s=s))))
 
                 letter = manager.mount_auto(self.browser, node, node.name,
                                             progress=_stage)
                 self.app.q.put(("call",
-                                lambda d=letter: self._set_status(
+                                lambda d=letter: self._set_mount_status(
                                     st.S("db_mount_ok").format(d=d))))
-                self.app.q.put(("call", self._mount_lamp_ok))
+                # the listing bar used to freeze at its last step (94.1%)
+                # after everything succeeded - finish it at 100% here
+                self.app.q.put(("call",
+                                lambda d=letter: self._paint_progress(
+                                    st.S("db_mount_ok").format(d=d))))
+                self.app.q.put(("call",
+                                lambda d=letter: self._mount_lamp_ok(d)))
             except Exception as exc:
                 msg = st.S("db_mount_failed").format(e=exc)
                 self.app.q.put(("call", self._mount_lamp_red))
                 self.app.q.put(("call",
-                                lambda msg=msg: self._set_status(msg)))
+                                lambda msg=msg: self._set_mount_status(msg)))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -341,13 +439,15 @@ class DataBrowserTab:
                     self.app.mount_manager = manager
                 n = manager.unmount_all()
                 self.app.q.put(("call",
-                                lambda: self._set_status(
+                                lambda: self._set_mount_status(
                                     st.S("db_unmount_ok").format(n=n))))
                 self.app.q.put(("call", self._mount_lamp_idle))
+                self.app.q.put(("call",
+                                lambda: self._paint_progress_frac(0.0, "")))
             except Exception as exc:  # noqa: BLE001
                 msg = f"error: {exc}"
                 self.app.q.put(("call",
-                                lambda msg=msg: self._set_status(msg)))
+                                lambda msg=msg: self._set_mount_status(msg)))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -359,13 +459,27 @@ class DataBrowserTab:
         "fail": (255, 80, 80),     # last mount attempt failed
     }
 
-    def _set_lamp(self, state: str):
+    def _set_lamp(self, state: str, letter: str = ""):
         tag = self.ids.get("lamp")
         if tag is None or not dpg.does_item_exist(tag):
             return
         try:
             dpg.configure_item(tag, color=self._LAMP_COLORS.get(state) or
                                self._LAMP_COLORS["idle"])
+            dpg.configure_item(tag, default_value=f"● {letter}".rstrip())
+            tag_status = self.ids.get("mount_status")
+            if state == "ok" and tag_status is not None \
+                    and dpg.does_item_exist(tag_status):
+                dpg.configure_item(tag_status, color=self._LAMP_COLORS["ok"])
+        except Exception:
+            pass
+
+    def _set_mount_status(self, text: str):
+        """Mount report line - separate from the scan/auto-list status."""
+        tag = self.ids.get("mount_status")
+        try:
+            if tag is not None and dpg.does_item_exist(tag):
+                dpg.set_value(tag, text)
         except Exception:
             pass
 
@@ -375,11 +489,28 @@ class DataBrowserTab:
     def _mount_lamp_busy(self):
         self._set_lamp("busy")
 
-    def _mount_lamp_ok(self):
-        self._set_lamp("ok")
+    def _mount_lamp_ok(self, letter: str = ""):
+        self._set_lamp("ok", letter)
 
     def _mount_lamp_red(self):
         self._set_lamp("fail")
+
+    def _db_log(self, msg: str):
+        """Console print AND the in-GUI log box (bounded to 200 lines)."""
+        print(f"[data_browser] {msg}" if not msg.startswith("[data_browser]")
+              else msg, flush=True)
+        self.app.q.put(("call", lambda m=msg: self._log_append(m)))
+
+    def _log_append(self, msg: str):
+        box = self.ids.get("log_box")
+        if box is None or not dpg.does_item_exist(box):
+            return
+        self._log_lines.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
+        self._log_lines = self._log_lines[-200:]
+        for kid in dpg.get_item_children(box, 1):
+            dpg.delete_item(kid)
+        for line in self._log_lines:
+            dpg.add_text(line, parent=box, color=(140, 190, 140))
 
     def _set_status(self, text: str):
         tag = self.ids.get("status")
@@ -390,15 +521,15 @@ class DataBrowserTab:
             pass
 
     def _apply_scan(self, root, diag=None):
-        dpg.delete_item(self.ids["tree"], children_only=True)
         self._node_map = {}
-        self._partition_keys = {}
         self._tree_busy = False
         self._tree_gen = getattr(self, "_tree_gen", 0) + 1
+        self._auto_list_done = False
         self.selected = None
         self.root_node = root
-        # debug artifact: what the scan actually saw, tree format
-        print("[data_browser] building tree...", flush=True)
+        # full-tree text dump (debug artifact) - tmp/data_browser_tree.txt
+        self._db_log(f"fast open: {len(root.children)} partitions; "
+                     f"listing + auto-mount follow")
         try:
             out = os.path.join(os.getcwd(), "tmp", "data_browser_tree.txt")
             os.makedirs(os.path.dirname(out), exist_ok=True)
@@ -407,61 +538,58 @@ class DataBrowserTab:
                 self._last_tree_dump = out
         except Exception as exc:  # noqa: BLE001
             self._last_tree_dump = None
-            print(f"[data_browser] fallback: tree dump failed ({exc})")
+            self._db_log(f"fallback: tree dump failed ({exc})")
         size = self._fmt_bytes(self.source.size())
         dpg.set_value(self.ids["status"],
                       f"{len(root.children)} partitions, {size} dump"
                       + (f", device: {diag['device_preset']}"
                          if diag and "device_preset" in diag else ""))
         self._paint_progress_frac(0.0, "listing partitions...")
-        self._add_nodes(root, self.ids["tree"], 0)
-        print("[data_browser] tree ready", flush=True)
-        # DPG item-click handlers proved unreliable in the live window, so
-        # nothing waits for clicks: partitions list themselves one by one
-        # (worker walk + chunked build); "..." turns into real content
         parts = list(root.children)
         if parts:
             threading.Thread(target=self._auto_list_worker,
                              args=(parts, self._tree_gen),
                              daemon=True).start()
 
-    def _add_nodes(self, node, parent, depth):
-        for child in node.children:
-            label = child.name + ("/" if child.is_dir else "")
-            with dpg.tree_node(parent=parent, label=label,
-                               default_open=depth == 0) as key:
-                self._node_map[key] = child
-                if not child.is_dir and child.size:
-                    dpg.add_text(f"  {child.size} B  {child.fs_label}",
-                                 color=(120, 120, 120))
-                if child.is_dir:
-                    # expand arrow until the auto-listing fills it
-                    if depth == 0:
-                        self._partition_keys[id(child)] = key
-                    dpg.add_tree_node(parent=key, label="...")
-
     def _auto_list_worker(self, parts, gen):
-        """Background: list partitions sequentially, one walk at a time."""
+        """Background: list partitions sequentially, one walk at a time.
+
+        A partition slot stuck longer than 120 s is force-released and
+        the listing moves on (auto-continue; the watchdog prints a
+        tagged fallback line so the stall is visible in the log).
+        """
         total = len(parts)
         for idx, node in enumerate(parts, 1):
+            waited = 0.0
             while self._tree_busy:
                 if gen != self._tree_gen:
                     return
                 time.sleep(0.05)
+                waited += 0.05
+                if waited >= 120.0:
+                    self._db_log(f"fallback: partition slot stuck "
+                                 f">120 s - force-continue with {node.name}")
+                    self._tree_busy = False
+                    break
             if gen != self._tree_gen:
                 return
             self._start_partition_listing(node, idx, total, gen)
+        # all partitions listed: the model is complete - auto-mount the
+        # dump as a read-only drive (skips the GUI-render stage entirely;
+        # Explorer shows the full depth without DPG limits)
+        self._auto_list_done = True
+        self.app.q.put(("call",
+                        lambda: self._set_status(st.S("db_automount"))))
+        self.app.q.put(("call", self.on_mount_selected))
 
     def _start_partition_listing(self, node, idx, total, gen):
-        """Walk one partition's FS in this worker, queue chunked build."""
+        """Walk one partition's FS in this worker (model + index only)."""
         self._tree_busy = True
         name = node.name
-        self.app.q.put(("call",
-                        lambda i=idx, t=total, n=name:
-                        self._set_status(
-                            f"listing partition {i}/{t}: {n}")))
+        # progress-bar label only: the general status line stays free for
+        # real messages (a mount report must not be buried by listing spam)
         self._paint_progress_frac((idx - 1) / max(1, total),
-                                  f"partition {idx}/{total}: {name}")
+                                  f"listing partition {idx}/{total}: {name}")
 
         def _work():
             t_list = time.perf_counter()
@@ -469,82 +597,19 @@ class DataBrowserTab:
                 info = self.browser.list_partition(node)
                 pct = idx / max(1, total) * 100.0
                 now = time.strftime("%H:%M:%S")
-                print(f"[data_browser] {name}: listed "
-                      f"({info['files']} files, {info['label']}, "
-                      f"{pct:.1f}%, {now} {idx}/{total}, "
-                      f"{time.perf_counter() - t_list:.1f}s)", flush=True)
-                plan: list[tuple] = []
-
-                def _plan(n, depth):
-                    for c in n.children:
-                        plan.append((c, n if depth else None, depth))
-                        if c.is_dir:
-                            _plan(c, depth + 1)
-
-                _plan(node, 0)
-                self._tree_keys = {}
-                self._tree_plan = plan
-                self._tree_total = max(1, len(plan))
-                self._tree_added = 0
-                self._tree_root_key = self._partition_keys.get(id(node))
-                self._tree_first = True
-                self._tree_label = f"partition {idx}/{total}: {name}"
-                self.app.q.put(("call",
-                                lambda g=gen:
-                                self._build_partition_tree(g)))
-                return
+                self._db_log(f"{name}: listed "
+                             f"({info['files']} files, {info['label']}, "
+                             f"{pct:.1f}%, {now} {idx}/{total}, "
+                             f"{time.perf_counter() - t_list:.1f}s)")
             except Exception as exc:  # noqa: BLE001
                 msg = f"{name}: listing failed: {exc}"
-                print(f"[data_browser] fallback: {msg}", flush=True)
+                self._db_log(f"fallback: {msg}")
                 self.app.q.put(("call",
                                 lambda msg=msg: self._set_status(msg)))
-            # listing failed: release the slot so the next partition goes
+            # release the slot so the next partition goes
             self._tree_busy = False
 
         threading.Thread(target=_work, daemon=True).start()
-
-    def _build_partition_tree(self, gen):
-        """GUI-thread chunk: build listed children, update the bar."""
-        if gen != self._tree_gen:
-            return
-        root_key = getattr(self, "_tree_root_key", None)
-        if not self._tree_plan:
-            self._tree_busy = False
-            if root_key is not None and dpg.does_item_exist(root_key) \
-                    and not dpg.get_item_children(root_key, 1):
-                dpg.add_text("(empty)", parent=root_key, color=(120, 120, 120))
-            return
-        if self._tree_first:
-            self._tree_first = False
-            if root_key is not None and dpg.does_item_exist(root_key):
-                for kid in dpg.get_item_children(root_key, 1):
-                    dpg.delete_item(kid)  # the "..." placeholder
-        batch = self._tree_plan[:150]
-        del self._tree_plan[:150]
-        for child, parent_node, depth in batch:
-            self._add_listed_node(child, parent_node, depth)
-        self._tree_added += len(batch)
-        frac = self._tree_added / self._tree_total
-        self._paint_progress_frac(frac,
-                                  f"{self._tree_label} - "
-                                  f"{self._tree_added}/{self._tree_total}")
-        self.app.q.put(("call", lambda g=gen: self._build_partition_tree(g)))
-
-    def _add_listed_node(self, child, parent_node, depth):
-        if parent_node is None:
-            parent = self._tree_root_key
-        else:
-            parent = self._tree_keys.get(id(parent_node))
-            if parent is None or not dpg.does_item_exist(parent):
-                return  # ancestor deleted by a rescan mid-build
-        label = child.name + ("/" if child.is_dir else "")
-        with dpg.tree_node(parent=parent, label=label,
-                           default_open=False) as key:
-            self._node_map[key] = child
-            if not child.is_dir and child.size:
-                dpg.add_text(f"  {child.size} B  {child.fs_label}",
-                             color=(120, 120, 120))
-            self._tree_keys[id(child)] = key
 
     # --- construction ------------------------------------------------------
     def build(self):
@@ -557,6 +622,7 @@ class DataBrowserTab:
         self.ids = {}
         with dpg.tab(label=st.S("tab_data_browser"), parent="mode_pages") as tab:
             self.ids["tab"] = tab
+            # --- source row: dump / chip / rescan -----------------------
             with dpg.group(horizontal=True):
                 dpg.add_button(label=st.S("db_browse_dump"),
                                callback=self.on_open_dump)
@@ -565,20 +631,37 @@ class DataBrowserTab:
                 dpg.add_button(label=st.S("db_scan"), callback=self.on_scan)
                 dpg.add_button(label=st.S("db_save_file"),
                                 callback=self.on_save_selected)
+            self.ids["status"] = dpg.add_text(st.S("db_none"),
+                                              color=(150, 150, 150))
+            self.ids["selected"] = dpg.add_text("", color=(200, 200, 120))
+            # --- LOG: mirrors console [data_browser] lines --------------
+            dpg.add_separator()
+            dpg.add_text(st.S("db_log_block"), color=(120, 200, 120))
+            with dpg.child_window(border=True, height=140,
+                                  no_scrollbar=False) as logw:
+                self.ids["log_box"] = logw
+            self._log_lines = []
+            # --- mount block: buttons + lamp + its own report line -----
+            # plain group, no child_window: autosize child windows inside
+            # a tab proved layout-hostile (they swallowed the source row)
+            dpg.add_separator()
+            dpg.add_text(st.S("db_mount_block"), color=(120, 200, 120))
+            with dpg.group(horizontal=True):
                 dpg.add_button(label=st.S("db_mount"),
                                 callback=self.on_mount_selected)
                 dpg.add_button(label=st.S("db_unmount_all"),
                                 callback=self.on_unmount_all)
-                # drive lamp: gray idle, yellow mounting, green mounted,
-                # red failed; hover tooltip says which
+                # drive lamp: gray idle, yellow mounting, green mounted
+                # ("● N"), red failed
                 dpg.add_spacer(width=6)
                 lamp = dpg.add_text("●", color=self._LAMP_COLORS["idle"])
                 with dpg.tooltip(lamp):
                     dpg.add_text(st.S("db_lamp_hint"))
                 self.ids["lamp"] = lamp
-            self.ids["status"] = dpg.add_text(st.S("db_none"),
-                                              color=(150, 150, 150))
-            self.ids["selected"] = dpg.add_text("", color=(200, 200, 120))
+            # dedicated mount report line: the scan auto-listing owns the
+            # general status and must never bury a mount result
+            self.ids["mount_status"] = dpg.add_text("",
+                                                    color=(150, 150, 150))
             # same symbolic bar style as Init eMMC (bar font, U+25B0/U+25B1)
             with dpg.group(horizontal=True):
                 dpg.add_spacer(width=2)
@@ -595,8 +678,6 @@ class DataBrowserTab:
                 if st.get_lang() == "ru" and dpg.does_item_exist("font_chat"):
                     dpg.bind_item_font(percent, "font_chat")
                 self.ids["progress_percent"] = percent
-            with dpg.child_window(border=True, height=-1) as tree:
-                self.ids["tree"] = tree
 
     # --- progress ----------------------------------------------------------
     @staticmethod

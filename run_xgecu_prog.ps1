@@ -1,10 +1,17 @@
 <#
 .SYNOPSIS
     Xgecu Prog Launcher by Soror L.'.L.'.
-    Version: 2.2.0
-    Updated: 2026-11-19
+    Version: 2.3.0
+    Updated: 2026-11-27
 
 .DESCRIPTION
+    Patchnote v2.3.0 (Soror L.'.L.'.):
+      [+] Zombie-kill also matches the command line (gui_dpg.py /
+          mount_host.py): windowless orphans (piped/daemon launches,
+          foreign interpreters) have no 'Xgecu' window title and were
+          invisible to the old exe-path/title filters.
+      [+] Script args pass through to the app (--db-selftest etc.), so
+          agent self-tests run the exact user launch path (env, caches).
     Patchnote v2.2.0 (Soror L.'.L.'.):
       [-] Removed legacy Kivy GUI support (-Legacy switch removed).
           DPG-only from this version forward.
@@ -91,6 +98,11 @@ foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -Er
     if ($p.ExecutablePath -and $p.ExecutablePath.ToLowerInvariant() -eq $projectPython) {
         $zombiePids[[uint32]$p.ProcessId] = "exe=$($p.ExecutablePath)"
     }
+    elseif ($p.CommandLine -match 'gui_dpg\.py|mount_host\.py') {
+        # windowless orphans: piped/daemon instances have no window title
+        # and may run on a foreign interpreter - match the project scripts
+        $zombiePids[[uint32]$p.ProcessId] = "cmdline=$($p.CommandLine)"
+    }
 }
 foreach ($gp in @(Get-Process -Name python -ErrorAction SilentlyContinue)) {
     if ($ancestorPids.ContainsKey([uint32]$gp.Id)) { continue }
@@ -114,7 +126,9 @@ if ($zombiePids.Count -gt 0) {
 # ==========================================================
 Set-Location $ROOT
 Write-Host "[INFO] Launcher: Starting Xgecu Prog (DearPyGui)..." -ForegroundColor Cyan
-& $PYTHON "-X" "utf8" "src\gui_dpg.py"
+# extra args (--db-selftest etc.) pass through to the app unchanged, so
+# agent-run self-tests use EXACTLY the user launch path (env, caches)
+& $PYTHON "-X" "utf8" "src\gui_dpg.py" @args
 $exitCode = $LASTEXITCODE
 
 # ==========================================================

@@ -1,5 +1,5 @@
 """Xgecu Prog DearPyGui frontend by Soror L.'.L.'.
-Version: 2.1.1
+Version: 2.1.5
 Updated: 2026-11-26
 
 Entry point: python src/gui_dpg.py [--demo | -Legacy]
@@ -7,6 +7,26 @@ Backend (orchestrator, modes/, t48_usb) is shared with the legacy Kivy
 gui.py. UI strings are localized via strings.py (RU/EN); journal lines
 arrive from the backend as-is.
 
+Patchnote v2.1.5 (Soror L.'.L.'.):
+  [*] The frame callback is exception-proof: one unguarded error used
+      to unregister the chain silently, so every queued UI update (bar,
+      mount report, auto-mount) froze while listing kept running in the
+      background. Errors now print a tagged fallback and the loop
+      re-arms itself every frame.
+Patchnote v2.1.4 (Soror L.'.L.'.):
+  [+] [GUI-view] heartbeat every 5 s from the GUI thread: the real
+      on-screen progress text, queue depth and frame interval - the
+      ground truth to compare against parser console percents when the
+      user reports "console 100%, screen 48%, frozen".
+Patchnote v2.1.3 (Soror L.'.L.'.):
+  [*] Self-test asserts every key tab widget exists before driving the
+      flow (a mount-block child_window with autosize swallowed the
+      source row - plain group + separator now, no child_window).
+Patchnote v2.1.2 (Soror L.'.L.'.):
+  [+] --db-selftest: real-window Data Browser self-test - opens the
+      dump, waits for the auto-listing, exercises Mount/Unmount via the
+      real handlers and reports [SELFTEST] PASS/FAIL; lets the agent
+      catch GUI regressions without asking the user to test.
 Patchnote v2.1.1 (Soror L.'.L.'.):
   [*] _process_queue drains at most 6 events per frame: chunked tree
       builds enqueue hundreds of callbacks and the old drain-all-in-one-
@@ -247,24 +267,33 @@ class DpgGui:
         tree nodes (~10 ms), and the chunked Data Browser build enqueues
         hundreds of chunks - draining them all back-to-back in one frame
         froze the window for minutes with a stalled bar.
+
+        Every event is guarded: one bad callback must not kill the drain
+        loop (it used to - a single NameError froze the GUI forever at
+        whatever percent the queue had reached).
         """
         deadline = time.perf_counter() + 0.008
         try:
             while True:
                 item = self.q.get_nowait()
-                kind = item[0]
-                if kind == "log":
-                    self._on_log(item[1])
-                elif kind == "table":
-                    self._on_table(*item[1:])
-                elif kind == "task":
-                    self._on_task(item[1])
-                elif kind == "progress":
-                    self._on_progress(item[1], item[2])
-                elif kind == "phase":
-                    self._on_phase(item[1])
-                elif kind == "call":
-                    item[1]()
+                try:
+                    kind = item[0]
+                    if kind == "log":
+                        self._on_log(item[1])
+                    elif kind == "table":
+                        self._on_table(*item[1:])
+                    elif kind == "task":
+                        self._on_task(item[1])
+                    elif kind == "progress":
+                        self._on_progress(item[1], item[2])
+                    elif kind == "phase":
+                        self._on_phase(item[1])
+                    elif kind == "call":
+                        item[1]()
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[GUI] fallback: queue event '{item[0]}' failed "
+                          f"({type(exc).__name__}: {exc}); continuing",
+                          flush=True)
                 if time.perf_counter() >= deadline:
                     break
         except queue.Empty:
@@ -375,8 +404,32 @@ class DpgGui:
         dpg.set_value("progress_speed_text", "{:.2f} MiB/s".format(self.progress_speed))
 
     def _drain_queue(self):
-        self._process_queue()
-        self._update_status_widgets()
+        # frame callback must NEVER die: any unguarded exception here used
+        # to silently unregister the callback chain, freezing every queued
+        # UI update (bar, mount report) at whatever it had reached.
+        try:
+            now = time.perf_counter()
+            last = getattr(self, "_hb_ts", None)
+            self._hb_ts = now
+            interval = 0.0 if last is None else (now - last) * 1000.0
+            if last is None or interval > 5000.0:
+                try:
+                    db = getattr(self, "_data_browser", None)
+                    pct_txt = ""
+                    if db is not None:
+                        tag = db.ids.get("progress_percent")
+                        if tag and self.dpg.does_item_exist(tag):
+                            pct_txt = str(self.dpg.get_value(tag))
+                    print(f"[GUI-view] frame={interval:.0f}ms "
+                          f"q={self.q.qsize()} screen={pct_txt!r}", flush=True)
+                except Exception:
+                    pass
+            self._process_queue()
+            self._update_status_widgets()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[GUI] fallback: frame handler error "
+                  f"({type(exc).__name__}: {exc}); re-arming frame loop",
+                  flush=True)
         if self._gui_ready and self.dpg.is_dearpygui_running():
             self.dpg.set_frame_callback(self.dpg.get_frame_count() + 1, self._drain_queue)
 
@@ -1684,6 +1737,91 @@ class DpgGui:
         self._refresh_extcsd_rows()
         print("[GUI] render ready", flush=True)
         self.dpg.set_frame_callback(self.dpg.get_frame_count() + 1, self._drain_queue)
+        if "--db-selftest" in sys.argv:
+            import threading
+            threading.Thread(target=self._db_selftest_worker,
+                             daemon=True).start()
+
+    def _db_selftest_worker(self):
+        """Real-window Data Browser self-test (--db-selftest).
+
+        Drives the actual GUI loop: opens the dump (no dialogs), waits for
+        the auto-listing, clicks Mount via its real handler, checks the
+        report line and lamp, unmounts, prints [SELFTEST] PASS/FAIL and
+        stops DearPyGui. Dump path: EMMC_DB_SELFTEST_DUMP env, else the
+        MTK UserData.BIN used by the smokes.
+        """
+        import os as _os
+        import time as _time
+        tab = self._data_browser
+        try:
+            deadline = _time.perf_counter() + 30
+            while not (tab.ids.get("tab") and self.dpg.does_item_exist(tab.ids["tab"])):
+                if _time.perf_counter() > deadline:
+                    raise RuntimeError("tab not built in 30 s")
+                _time.sleep(0.2)
+            # every key widget of the tab must exist (layout regressions)
+            missing = [k for k, v in tab.ids.items()
+                       if k != "tab" and (v is None
+                                          or not self.dpg.does_item_exist(v))]
+            if missing:
+                raise RuntimeError(f"missing widgets: {missing}")
+            print("[SELFTEST] all tab widgets present", flush=True)
+            dump = _os.environ.get(
+                "EMMC_DB_SELFTEST_DUMP",
+                r"K:\drop\XgproV1316_T48_T56_T866II_Setup\XgproV1316_Setup"
+                r"\UserData\Emmc_data\UserData.BIN")
+            if not _os.path.exists(dump):
+                raise RuntimeError(f"selftest dump not found: {dump}")
+            from modes.emmc.data_browser import DataBrowser, FileSource, RangeCache
+            t0 = _time.perf_counter()
+            source = FileSource(dump)
+            cache = RangeCache(source, chunk_size=16384, max_chunks=512)
+            browser = DataBrowser(cache)
+            root, diag = browser.build(list_fs=False)
+            self.q.put(("call", lambda: tab._adopt_scan(cache, browser, root)))
+            # wait for the background listing, then for the auto-mount
+            deadline = _time.perf_counter() + 300
+            while _time.perf_counter() < deadline:
+                _time.sleep(0.3)
+                if getattr(tab, "_auto_list_done", False) \
+                        and not tab._tree_busy:
+                    break
+            listed = sum(1 for n in root.children if n.children)
+            total_files = sum(1 for n in root.walk() if not n.is_dir)
+            print(f"[SELFTEST] listed {listed}/{len(root.children)} partitions, "
+                  f"{total_files} files in {time.perf_counter() - t0:.1f}s",
+                  flush=True)
+            if listed < 1 or total_files < 1:
+                raise RuntimeError("auto-listing produced no content")
+            deadline = _time.perf_counter() + 120
+            while _time.perf_counter() < deadline:
+                _time.sleep(0.3)
+                if "Mounted" in self.dpg.get_value(tab.ids["mount_status"]):
+                    break
+            report = self.dpg.get_value(tab.ids["mount_status"])
+            lamp = self.dpg.get_value(tab.ids["lamp"])
+            if "Mounted" not in report:
+                raise RuntimeError(f"auto-mount report: {report!r}")
+            print(f"[SELFTEST] auto-mount report: {report!r}; lamp: {lamp!r}",
+                  flush=True)
+            bar = self.dpg.get_value("db_progress_textbar")
+            if "100%" not in bar:
+                raise RuntimeError(f"bar not in done state: {bar!r}")
+            print(f"[SELFTEST] bar done state: {bar!r}", flush=True)
+            self.q.put(("call", tab.on_unmount_all))
+            deadline = _time.perf_counter() + 30
+            while _time.perf_counter() < deadline:
+                _time.sleep(0.2)
+                if "Unmounted" in self.dpg.get_value(tab.ids["mount_status"]):
+                    break
+            print(f"[SELFTEST] unmount: "
+                  f"{self.dpg.get_value(tab.ids['mount_status'])!r}", flush=True)
+            print("[SELFTEST] PASS", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[SELFTEST] FAIL: {type(exc).__name__}: {exc}", flush=True)
+        finally:
+            self.q.put(("call", self.dpg.stop_dearpygui))
 
     def _build_emmc_page(self):
         dpg = self.dpg
